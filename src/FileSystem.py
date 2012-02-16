@@ -28,10 +28,6 @@ def create_manifest():
 
 
 def walktree(top):
-    '''
-    recursively descend the directory tree rooted at top,
-    calling the callback function for each regular file
-    '''
     for f in os.listdir(top):
         #Skip private folder form synchronization
         if f == private_dir:
@@ -53,7 +49,6 @@ def get_statistics(filename):
     filetype = ''
     hashfile = 0
     filesize = 0
-    #print 'visiting:', filename
     file_stats = os.lstat(filename)
     mode = file_stats[ST_MODE]
     # For directories we only need to retrieve the type and timestamp.

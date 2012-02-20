@@ -65,7 +65,9 @@ class SyncCFT:
         
         #self.fsystem.write_manifest(filelist)
         #self.fsystem.inspect_folder(self.folder)
-        
+        print "Here we are"
+        print "Here we are"
+        print "Here we are"
 
     def signal_handler(self, signal, frame):
         self.logger.warning("You pressed Ctrl+C")

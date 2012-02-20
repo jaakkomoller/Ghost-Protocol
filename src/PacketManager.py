@@ -27,7 +27,9 @@ class PacketManager():
         pass
         
     def build_packet(self, payload): 
+
         byte1 = 0x80
         byte2 = 0x00
+        byte3 = 0x00
         packet = struct.pack("!BB",byte1,byte2)+struct.pack("!H",self.sequence)+struct.pack("!L",self.timestamp)+struct.pack("!L",self.ssrc)+bytearray(payload)        
         return packet

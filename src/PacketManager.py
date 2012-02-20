@@ -1,7 +1,7 @@
 import logging, struct
 
 class PacketManager():
-    def __init__(self, version, payload_type, sequence, timestamp, ssrc):
+    def __init__(self, version=1, payload_type, sequence, timestamp, ssrc):
         self.version = 0            #4 bit
         self.flags = 0              #4 bit
         self.extension_bit = 0      #1 bit

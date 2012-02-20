@@ -1,3 +1,5 @@
+#Some comment
+
 import logging, struct
 
 class PacketManager():

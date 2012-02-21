@@ -3,6 +3,7 @@ To do:
 * Add variables for dynamic field size
 * Build a dictionary with TLVtypes for verification
 * Read TLV from rawdata
+
 '''
 
 import logging, struct

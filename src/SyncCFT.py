@@ -3,7 +3,7 @@ import logging, sys, select, signal, string, thread, threading, time
 from Configuration import *
 from FileSystem import *
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s', datefmt='%d.%m.%y %H:%M:%S', filename='SyncCFT.log', filemode='w')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s', datefmt='%d.%m.%y %H:%M:%S', filename='SyncCFT.log', filemode='w')
 console = logging.StreamHandler()
 console.setLevel(logging.DEBUG) 
 formatter = logging.Formatter('%(levelname)s: %(name)s: %(message)s')
@@ -35,39 +35,57 @@ class SyncCFT:
         for item in self.peers:
             self.logger.info("Peer %d: %s:%s" % (i,str(item[0]),str(item[1])))
             i+=1
-        
-        
-        
 
     def start_SyncCFT(self):
         #print "Starting SyncCFT 1.0\n"
-        diff_manifest = []
+        starting_dic = {}
+        current_dic = {}
+        previous_dic = {}
+        diff_dic = {}
+        flag = True
         self.fsystem = FileSystem(self.folder, '.private')
         
         if self.fsystem.exists_manifest():
             self.logger.info("Found manifest file!")
-            starting_manifest = self.fsystem.read_manifest()
+            starting_dic = self.fsystem.read_manifest()
+            
         else:
             self.logger.warning("Manifest file not found!")
-            starting_manifest = self.fsystem.get_file_list(1)
-        
-        self.fsystem.print_manifest(starting_manifest)
-        #self.fsystem.write_manifest(starting_manifest)
+            starting_dic = self.fsystem.get_file_list(1)
+            
+        print "\nStarting manifest"
+        self.fsystem.print_manifest_dic(starting_dic)
+        current_dic = self.fsystem.get_file_list(1)
         
         while not self.exit_flag:
-            time.sleep(4)
-            last_manifest = self.fsystem.get_file_list()
-            #print "\n\nThis is the fresh manifest"
-            self.fsystem.print_manifest(last_manifest)
-            diff_manifest = self.fsystem.diff_manifest(last_manifest, starting_manifest)
-            print "\n\nThis is the diff version"
-            self.fsystem.print_manifest(diff_manifest)
-        
-        #self.fsystem.write_manifest(filelist)
-        #self.fsystem.inspect_folder(self.folder)
-        print "Here we are"
-        print "Here we are"
-        print "Here we are"
+            try:
+                raw_input('')
+            except:
+                continue
+
+            if len(diff_dic) != 0:
+                self.fsystem.merge_manifest(current_dic, diff_dic)
+            
+            if flag:
+                diff_dic = self.fsystem.diff_manifest(current_dic, starting_dic)
+                previous_dic = current_dic
+                flag = False
+            
+            else:
+                current_dic = self.fsystem.get_file_list(1)
+                
+                diff_dic = self.fsystem.diff_manifest(current_dic, previous_dic)
+            
+                self.fsystem.merge_manifest(current_dic, diff_dic)
+
+                print "\nPrinting current dictionary"
+                self.fsystem.print_manifest_dic(current_dic)
+                print('\n')
+                previous_dic = current_dic
+            
+                
+        self.fsystem.write_manifest(current_dic)
+        print "To be coded..."
 
     def signal_handler(self, signal, frame):
         self.logger.warning("You pressed Ctrl+C")

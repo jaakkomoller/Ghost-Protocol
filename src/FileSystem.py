@@ -1,9 +1,11 @@
 import hashlib, logging, os, sys, time
 from stat import *
 
-#folder_content = []
-#root_path = '/home/tester/testdir/'
-#private_dir = '.private'
+FILETYPE = 0
+FILEPATH = 1
+FILESIZE = 2
+FILETSTAMP = 3
+FILEHASH = 4
 
 class FileSystem:
     def __init__(self,path, private_dir):
@@ -31,80 +33,114 @@ class FileSystem:
         return True
 
     def read_manifest(self):
-        templist=[]
+        tempdic = {}
         fd = open(self.manifest_path,'r')
         lines = fd.readlines()
         fd.close()
         for line in lines:
             temp = line.strip().split('\t')
-            entry = (temp[0],temp[1],temp[2],temp[3],temp[4])
-            templist.append(entry)
-        return templist
+            entry = (temp[FILETYPE],temp[FILEPATH],temp[FILESIZE],temp[FILETSTAMP],temp[FILEHASH])
+            tempdic[(temp[FILETYPE],temp[FILEPATH])] = entry
+        return tempdic
         
-    def write_manifest(self, infolist):
+    def write_manifest(self, infodic):
         fd = open(self.manifest_path,'w')
-        for i in infolist:
-            #towrite = "%s?%s?%s?%s?%s" % (str(i[0]),str(i[1]),str(i[2]),str(i[3]),str(i[4]))
-            towrite = "%s\t%s\t%s\t%s\t%s" % (str(i[0]),str(i[1]),str(i[2]),str(i[3]),str(i[4]))
+        for key,value in sorted(infodic.iteritems(), key=lambda (k,v): (v[FILETSTAMP],k), reverse=True):
+            towrite = "%s\t%s\t%s\t%s\t%s" % (value[FILETYPE],value[FILEPATH],value[FILESIZE],value[FILETSTAMP],value[FILEHASH])
             fd.write(towrite+'\r\n')
             self.logger.info(towrite)
         fd.close()
     
     def print_manifest(self, infolist):
         for i in infolist:
-            print "%s\t%s\t%s\t%s\t%s" % (str(i[0]),str(i[1]),str(i[2]),str(i[3]),str(i[4]))
+            print "%s\t%s\t%s\t%s\t%s" % (i[FILETYPE],i[FILEPATH],i[FILESIZE],i[FILETSTAMP],i[FILEHASH])
     
+    def print_manifest_dic(self, infodic):
+        if len(infodic) != 0:
+            for key,value in sorted(infodic.iteritems(), key=lambda (k,v): (v[FILETSTAMP],k), reverse=True):
+                print "%s\t%s\t%s\t%s\t%s" % (value[FILETYPE],value[FILEPATH],value[FILESIZE],value[FILETSTAMP],value[FILEHASH])
+    
+    def get_sorted_list(self, infodic):
+        sortedlist = []
+        if len(infodic) != 0:
+            for key,value in sorted(infodic.iteritems(), key=lambda (k,v): (v[FILETSTAMP],k), reverse=True):
+                sortedlist.append((value[FILETYPE],value[FILEPATH],value[FILESIZE],value[FILETSTAMP],value[FILEHASH]))
+    
+        
     def diff_manifest(self, newfile, oldfile):
-        difflist=[]
+        if len(newfile)==0 or len(oldfile)==0:
+            return {}
+        
+        diffdic  = {}
         if newfile != oldfile:
-            #print "Additive diff"
-            for new_item in newfile:
-                #print "\n\nnew_item:", new_item
-                found = False
-                for old_item in oldfile:
-                    #print "old_item:", old_item
-                    #Compare type, name and timestamp
-                    if new_item[0]==old_item[0] and new_item[1]==old_item[1] and new_item[3]==old_item[3]:
-                        found = True
-                        break
-                if not found:
-                    difflist.append(new_item)
-                    self.logger.debug("Pos diff: %s" % (str(new_item)))
+            for newkey, newvalue in newfile.items():
+                if oldfile.has_key(newkey):
+                    oldvalue = oldfile[newkey]
+                    if newvalue[FILETSTAMP]>oldvalue[FILETSTAMP]:
+                        self.logger.debug("Updated file '%s'" % (newvalue[FILEPATH]))
+                    else:
+                        self.logger.debug("No change in file '%s'" % (newvalue[FILEPATH]))
+                else:
+                    self.logger.debug("New file '%s'" % (newvalue[FILEPATH]))
+                    diffdic[('NEW',newkey[0],newkey[1])]=newvalue
             
-            #print "\n\nNegative diff"
-            for old_item in oldfile:
-                #print "\n\nold_item:", old_item
-                found = False
-                for new_item in newfile:
-                    #print "new_item:", new_item
-                    #Compare type, name and timestamp
-                    if new_item[0]==old_item[0] and new_item[1]==old_item[1] and new_item[3]==old_item[3]:
-                        found = True
-                        break
-                if not found:
-                    if old_item[0] == 'DIR':
-                        etype = 'RMD'
-                    if old_item[0] == 'FIL':
-                        etype = 'RMF'
-
-                    diffentry = (etype,old_item[1],old_item[2],str(long(time.time())),old_item[4])
-                    difflist.append(diffentry)
-                    self.logger.debug("Neg diff: %s" % (str(diffentry)))
-
+            for oldkey, oldvalue in oldfile.items():
+                if not newfile.has_key(oldkey):
+                    self.logger.debug("Ooops file removed '%s'" % (oldvalue[FILEPATH]))
+                    print oldvalue
+                    if oldkey[FILETYPE]=='DIR':
+                        print "Adding to difflist a deleted DIR"
+                        tmp = ('RMD',oldvalue[FILEPATH],oldvalue[FILESIZE],str(long(time.time())),oldvalue[FILEHASH])
+                        diffdic[('DEL','RMD',oldvalue[FILEPATH])]=tmp
+                    elif oldkey[FILETYPE]=='FIL':
+                        print "Adding to difflist a deleted FIL"
+                        tmp = ('RMF',oldvalue[FILEPATH],oldvalue[FILESIZE],str(long(time.time())),oldvalue[FILEHASH])
+                        diffdic[('DEL','RMF',oldvalue[FILEPATH])]=tmp
+                    elif oldkey[FILETYPE]=='RMD' or oldkey[FILETYPE]=='RMF':
+                        print "Adding to difflist a previously deleted record"
+                        diffdic[('CHK',oldvalue[FILETYPE],oldvalue[FILEPATH])]=oldvalue
+                    else:
+                        self.logger.error("Something nasty happened!")
+                    
+                
         else:
             print "The manifest is the same"
-        return difflist
-                
+        return diffdic
+   
+
+    def merge_manifest(self, currentdic, diffdic):
+        if len(currentdic)==0 or len(diffdic) == 0:
+            return
+        
+        for key,value in diffdic.items():
+            #print "Item ", value
+            if key[0] == 'DEL':
+                self.logger.debug("Adding entry in merger %s : %s" % (value[0],value[1]))
+                currentdic[(key[1],key[2])]=[value[0],value[1],value[2],value[3],value[4]]
+            elif key[0] == 'CHK':
+                #This happens when there is a DEL old record
+                if key[1]=='RMD':
+                    etype = 'DIR'
+                elif key[1]=='RMF':
+                    etype = 'FIL'
+                if currentdic.has_key((etype,value[1])):
+                    #print "New entry over a deleted one has been found!", value[1]
+                    pass
+                else:
+                    #print "Still no new entry over the deleted file! Leaving in dic. ", value[1]
+                    currentdic[(key[1],key[2])]=[value[0],value[1],value[2],value[3],value[4]]
+                #print "Error in merge %s : %s" % (key,value)
+            
     def get_file_list(self, deep=0):
-        templist = []
-        self.inspect_folder(os.getcwd(), templist, deep)
-        #Sort the list first by timestamp
-        sortedlist = sorted(templist, key=lambda data: data[3], reverse=True)
-        return sortedlist
+        tempdic = {}
+        tempdic2 = {}
+        self.inspect_folder(os.getcwd(), tempdic, deep)
+        for key,value in sorted(tempdic.iteritems(), key=lambda (k,v): (v[3],k), reverse=True):
+            tempdic2[key]=value
+        return tempdic2
     
-    def inspect_folder(self, top_level, infolist, deep=0):
+    def inspect_folder(self, top_level, infodic, deep=0):
         for f in os.listdir(top_level):
-            #print '*** visiting...', f
             if top_level==self.root_path and f == self.private_dir:
                 #print "Skipping private folder"
                 continue
@@ -115,17 +151,17 @@ class FileSystem:
             if S_ISDIR(mode):
                 timestamp = str(file_stats[ST_MTIME])
                 fname = pathname.split(self.root_path,1)[1][1:]
-                infolist.append(('DIR',fname,'0',timestamp,'0'))
-                self.inspect_folder(pathname, infolist, deep)
+                infodic[('DIR',fname)]=['DIR',fname,'0',timestamp,'0']
+                self.inspect_folder(pathname, infodic, deep)
                 
             elif S_ISREG(mode):
-                hashfile = 0
+                hashfile = '0'
                 filesize =  str(file_stats[ST_SIZE])
                 timestamp = str(file_stats[ST_MTIME])
                 fname = pathname.split(self.root_path,1)[1][1:]
                 if deep:
                     hashfile = str(self.get_md5sum_hex(pathname))
-                infolist.append(('FIL',fname,filesize,timestamp,hashfile))
+                infodic[('FIL',fname)]=['FIL',fname,filesize,timestamp,hashfile]
 
             else:
                 self.logger.error("Not a file or a directory: %s" % (str(pathname)))

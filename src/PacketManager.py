@@ -1,3 +1,5 @@
+#Some comment
+
 import logging, struct
 
 class PacketManager():
@@ -15,7 +17,7 @@ class PacketManager():
         self.ocode = ocode                  #8 bit
         self.checksum = 0                   #16bit
         
-        self.TLVs = []               #variable
+        self.TLVs = []                      #variable
         
         self.logger = logging.getLogger("PacketManager")
         self.logger.info("PacketManager created")
@@ -25,9 +27,18 @@ class PacketManager():
     
     def verify_checksum(self):
         pass
+    
+    def build_TLVs(self):
+        bytearray(self.TLVs)
+        pass
         
     def build_packet(self, payload): 
-        byte1 = 0x80
-        byte2 = 0x00
-        packet = struct.pack("!BB",byte1,byte2)+struct.pack("!H",self.sequence)+struct.pack("!L",self.timestamp)+struct.pack("!L",self.ssrc)+bytearray(payload)        
+        byte1 = self.version << 4 | self.flags
+        byte2 = self.exp << 4 | self.nextTLV
+
+        packet = struct.pack("!BB",byte1,byte2)+struct.pack("!H",self.senderID)+\
+                    struct.pack("!H",self.txlocalID)+struct.pack("!H",self.txremoteID)+\
+                    struct.pack("!L",self.sequence)+struct.pack("!BB",self.otype,self.ocode)+\
+                    struct.pack("!L",self.checksum)+self.build_TLVs()
+        
         return packet

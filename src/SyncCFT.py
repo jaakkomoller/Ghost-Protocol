@@ -2,6 +2,7 @@ import logging, sys, select, signal, string, thread, threading, time
 
 from Configuration import *
 from FileSystem import *
+from PacketManager import *
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s', datefmt='%d.%m.%y %H:%M:%S', filename='SyncCFT.log', filemode='w')
 console = logging.StreamHandler()
@@ -44,6 +45,7 @@ class SyncCFT:
         diff_dic = {}
         flag = True
         self.fsystem = FileSystem(self.folder, '.private')
+        self.packetmanager = PacketManager()
         
         if self.fsystem.exists_manifest():
             self.logger.info("Found manifest file!")
@@ -56,6 +58,7 @@ class SyncCFT:
         print "\nStarting manifest"
         self.fsystem.print_manifest_dic(starting_dic)
         current_dic = self.fsystem.get_file_list(1)
+        
         
         while not self.exit_flag:
             try:
@@ -85,7 +88,17 @@ class SyncCFT:
             
                 
         self.fsystem.write_manifest(current_dic)
+        
+        
+        
         print "To be coded..."
+        
+        self.packetmanager.append_entry_to_TLVlist(('FIL','testfile1'))
+        self.packetmanager.append_entry_to_TLVlist(('FIL','testfile2'))
+        self.packetmanager.append_entry_to_TLVlist(('DIR','testdir1'))
+        self.packetmanager.append_entry_to_TLVlist(('DIR','testdir2'))
+        
+        self.packetmanager.build_TLVs()
 
     def signal_handler(self, signal, frame):
         self.logger.warning("You pressed Ctrl+C")

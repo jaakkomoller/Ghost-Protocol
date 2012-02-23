@@ -64,8 +64,8 @@ class FileSystem:
         sortedlist = []
         if len(infodic) != 0:
             for key,value in sorted(infodic.iteritems(), key=lambda (k,v): (v[FILETSTAMP],k), reverse=True):
-                sortedlist.append((value[FILETYPE],value[FILEPATH],value[FILESIZE],value[FILETSTAMP],value[FILEHASH]))
-    
+                sortedlist.append([value[FILETYPE],value[FILEPATH],value[FILESIZE],value[FILETSTAMP],value[FILEHASH]])
+        return sortedlist
         
     def diff_manifest(self, newfile, oldfile):
         if len(newfile)==0 or len(oldfile)==0:

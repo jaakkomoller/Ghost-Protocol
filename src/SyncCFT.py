@@ -89,16 +89,33 @@ class SyncCFT:
                 
         self.fsystem.write_manifest(current_dic)
         
+        print "Creating the packet..."
+        self.packetmanager.create_packet(2, 15, 0, 'D', 43962, 52428, 56797, 3150765550, 85, 102, None, None)
         
+        #self.packetmanager.append_entry_to_TLVlist('D', 'FIL?testfile1?000?456')
+        self.packetmanager.append_entry_to_TLVlist('D', 'test')
+        self.packetmanager.append_entry_to_TLVlist('D', 'test2')
+        #self.packetmanager.append_entry_to_TLVlist('D', 'FIL?testfile3?002?456')
         
-        print "To be coded..."
+        bpacket = self.packetmanager.build_packet()
         
-        self.packetmanager.append_entry_to_TLVlist(('FIL','testfile1'))
-        self.packetmanager.append_entry_to_TLVlist(('FIL','testfile2'))
-        self.packetmanager.append_entry_to_TLVlist(('DIR','testdir1'))
-        self.packetmanager.append_entry_to_TLVlist(('DIR','testdir2'))
+        sraw = '\x2F\x44\xAB\xBA\xCC\xCC\xDD\xDD\xBB\xCC\xDD\xEE\x55\x66\x56\x69\x44\x00\x00\x34\x74\x65\x73\x74\xFF\x00\x00\x35\x74\x65\x73\x74\x33'
+        self.packetmanager.create_packet(rawdata=sraw)
         
-        self.packetmanager.build_TLVs()
+        print "This is the packet returned: len()", len(bpacket)
+        print bpacket
+        
+        i=0
+        for item in bpacket:
+            if i%8 == 0:
+                print " ",
+            if i%16 == 0:
+                print "\n%d." % (i/16),
+            if item == '0':
+                print "00",
+            else:
+                print "%X" % (ord(item)),
+            i+=1
 
     def signal_handler(self, signal, frame):
         self.logger.warning("You pressed Ctrl+C")

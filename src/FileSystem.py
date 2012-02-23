@@ -76,10 +76,11 @@ class FileSystem:
             for newkey, newvalue in newfile.items():
                 if oldfile.has_key(newkey):
                     oldvalue = oldfile[newkey]
-                    if newvalue[FILETSTAMP]>oldvalue[FILETSTAMP]:
+                    if newvalue[FILETSTAMP]>oldvalue[FILETSTAMP] and newvalue[FILEHASH]!=oldvalue[FILEHASH]:
                         self.logger.debug("Updated file '%s'" % (newvalue[FILEPATH]))
                     else:
-                        self.logger.debug("No change in file '%s'" % (newvalue[FILEPATH]))
+                        #self.logger.debug("No change in file '%s'" % (newvalue[FILEPATH]))
+                        pass
                 else:
                     self.logger.debug("New file '%s'" % (newvalue[FILEPATH]))
                     diffdic[('NEW',newkey[0],newkey[1])]=newvalue
@@ -89,19 +90,18 @@ class FileSystem:
                     self.logger.debug("Ooops file removed '%s'" % (oldvalue[FILEPATH]))
                     print oldvalue
                     if oldkey[FILETYPE]=='DIR':
-                        print "Adding to difflist a deleted DIR"
+                        self.logger.debug("Adding to difflist a deleted DIR")
                         tmp = ('RMD',oldvalue[FILEPATH],oldvalue[FILESIZE],str(long(time.time())),oldvalue[FILEHASH])
                         diffdic[('DEL','RMD',oldvalue[FILEPATH])]=tmp
                     elif oldkey[FILETYPE]=='FIL':
-                        print "Adding to difflist a deleted FIL"
+                        self.logger.debug("Adding to difflist a deleted FIL")
                         tmp = ('RMF',oldvalue[FILEPATH],oldvalue[FILESIZE],str(long(time.time())),oldvalue[FILEHASH])
                         diffdic[('DEL','RMF',oldvalue[FILEPATH])]=tmp
                     elif oldkey[FILETYPE]=='RMD' or oldkey[FILETYPE]=='RMF':
-                        print "Adding to difflist a previously deleted record"
+                        self.logger.debug("Adding to difflist a previously deleted record")
                         diffdic[('CHK',oldvalue[FILETYPE],oldvalue[FILEPATH])]=oldvalue
                     else:
                         self.logger.error("Something nasty happened!")
-                    
                 
         else:
             print "The manifest is the same"

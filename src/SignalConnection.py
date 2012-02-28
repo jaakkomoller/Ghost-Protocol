@@ -9,10 +9,11 @@ class SignalServer(Thread):
 	
 	sock = None
 	logger = None
-	sender_id = ""
+	sender_id = 0
 	buf_size = 2000 # TODO This is not nice
 	connection_list = [] # List of established connections
 	exit_flag = False
+	received_packet = None
 
 	# TODO Throw error in case bind fails (Might do it already...)
 	def __init__(self, ip = "127.0.0.1", port = 5500):
@@ -26,8 +27,9 @@ class SignalServer(Thread):
 
     		self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 		self.sock.bind((ip, port))
-		self.sock.settimeout(0.5)
+		self.sock.settimeout(0.5) # So we can exit and wont block forever in recvfrom
 
+		self.received_packet = PacketManager()
 
 
 	def run(self):
@@ -44,8 +46,10 @@ class SignalServer(Thread):
 				else:
 					self.logger.alarm("error with socket")
 			print "received message:", data
+			self.received_packet.packetize_raw(data)
+			self.received_packet.print_packet()
 
-	# destination list should contain [ip] [port] tuples
+	# destination list should contain (ip, port) tuples
 	def init_connections(self, destination_list):
 		
 		# todo create hello packet
@@ -53,8 +57,12 @@ class SignalServer(Thread):
 
 		for destination in destination_list:
 			print 'connecting to ' + destination[0] + ', ' + destination [1]
-			self.sock.sendto("daddaa", (destination[0], int(destination[1])) )
+			#self.sock.sendto("daddaa", (destination[0], int(destination[1])) )
 			# todo Create connection and call connect and add to connection list
+			#def __init__(self, server, remote_ip, remote_port, remote_session_id, local_session_id, version = 1, seq_no = 1000):
+			connection = Connection(self, destination[0], int(destination[1]), 1)
+			connection.connect()
+			self.connection_list.append(connection)
 
 	def stop(self):
 		self.logger.info("server should stop")
@@ -72,34 +80,39 @@ class Connection:
 	server = None # Pointer to SignalServer server (for shared info, such as Sender ID)
 	version = 1
 	remote_ip = None
-	local_ip = None
 	remote_port = 0
 	seq_no = 0	# Our seq no
-	sent_ack_no = 0	# Last seq we have acked
+	ack_no = 0	# Last seq we have received in order
 	recv_ack_no = 0	# What remote side has acked
-	local_session_id = ""
-	remote_session_id = ""
+	local_session_id = 0
+	remote_session_id = 0
 	state = State.UNCONNECTED
 	packet = None
 
-	def __init__(self, server, remote_ip, remote_port, remote_session_id, local_session_id, version = 1, seq_no = 1000):
+	# TODO check initializations
+	def __init__(self, server, remote_ip, remote_port, local_session_id, remote_session_id = 0,
+			version = 1, seq_no = 1000):
 		self.server = server     # Pointer to server (for shared info, such as Sender ID)
         	self.version = version
         	self.remote_ip = remote_ip
-        	self.local_ip = local_ip
         	self.remote_port = remote_port
         	self.seq_no = seq_no
-        	self.sent_ack_no = sent_ack_no
-        	self.recv_ack_no = recv_ack_no
+        	self.sent_ack_no = 0
+        	self.recv_ack_no = 0
         	self.local_session_id = local_session_id
         	self.remote_session_id = remote_session_id
 		self.packet = PacketManager()
 
 	def connect(self):
-		self.server.sock.sendto(self.packet.hex_packet(), (self.remote_ip, self_remote_port) )
+    		#def create_packet(self, version=1, flags=0, senderID=0, txlocalID=0, txremoteID=0,
+                #     sequence=0, ack=0, otype=0, ocode=0, TLVlist=None, rawdata=None):
+		# Packet manager should be able to build hello packets (i.e. set remote session id)
+		self.packet.create_packet(self.version, 0, self.server.sender_id, self.local_session_id,
+			0, self.seq_no, self.ack_no, 1)  
+		self.server.sock.sendto(self.packet.build_packet(), (self.remote_ip, self.remote_port) )
 		self.state = Connection.State.HELLO_SENT
 
-
+	
 
 
 # For testing purposes
@@ -124,7 +137,6 @@ def main():
         (port, folder, p_prob, q_prob, peers) = conf_values
         #Logging of configuration 
         logger.info("Listening on UDP port %s" % (str(port)))
-        logger.info("Synchronizing folder %s" % (str(folder)))
         logger.info("'p' parameter: %s" % (str(p_prob)))
         logger.info("'q' parameter: %s" % (str(q_prob)))
 	logger.info("Peers to connect:")

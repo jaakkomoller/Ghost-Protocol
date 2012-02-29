@@ -45,9 +45,26 @@ class SignalServer(Thread):
 					continue
 				else:
 					self.logger.alarm("error with socket")
-			print "received message:", data
+			self.logger.info("received message")
 			self.received_packet.packetize_raw(data)
 			self.received_packet.print_packet()
+			found = False
+			for connection in self.connection_list:
+				if self.received_packet.txremoteID == connection.local_session_id:
+					connection.handle(self.received_packet)
+					found = True
+					self.logger.info("packet belongs to existing connection")
+					break
+			if not found and self.received_packet.otype == 1 :
+				connection = Connection(self, addr[0], addr[1], 
+					2, self.received_packet.txlocalID, # TODO init localsession id
+					self.received_packet.version, 1000) # TODO init seq no
+				connection.hello_recv()
+				self.connection_list.append(connection)
+				self.logger.info("hello packet received, new connection established\
+(local id %d, remote id %d) and HELLO sent" % (connection.local_session_id, connection.remote_session_id))
+				
+
 
 	# destination list should contain (ip, port) tuples
 	def init_connections(self, destination_list):
@@ -56,10 +73,8 @@ class SignalServer(Thread):
         	#self.packetmanager.create_packet(2, 15, 43962, 52428, 56797, 3150765550, 286331153, 85, 102, None, None)
 
 		for destination in destination_list:
-			print 'connecting to ' + destination[0] + ', ' + destination [1]
+			self.logger.info('connecting to ' + destination[0] + ', ' + destination [1])
 			#self.sock.sendto("daddaa", (destination[0], int(destination[1])) )
-			# todo Create connection and call connect and add to connection list
-			#def __init__(self, server, remote_ip, remote_port, remote_session_id, local_session_id, version = 1, seq_no = 1000):
 			connection = Connection(self, destination[0], int(destination[1]), 1)
 			connection.connect()
 			self.connection_list.append(connection)
@@ -74,7 +89,7 @@ class Connection:
 		UNCONNECTED = 0
 		HELLO_SENT = 1
 		HELLO_RECVD = 2
-		IDLE = 3
+		CONNECTED = 3
 
 	# TODO add timers
 	server = None # Pointer to SignalServer server (for shared info, such as Sender ID)
@@ -88,6 +103,7 @@ class Connection:
 	remote_session_id = 0
 	state = State.UNCONNECTED
 	packet = None
+	logger = None
 
 	# TODO check initializations
 	def __init__(self, server, remote_ip, remote_port, local_session_id, remote_session_id = 0,
@@ -102,6 +118,10 @@ class Connection:
         	self.local_session_id = local_session_id
         	self.remote_session_id = remote_session_id
 		self.packet = PacketManager()
+		self.state = Connection.State.UNCONNECTED
+
+        	self.logger = logging.getLogger("Connection to " + str(self.remote_ip) + ':' + str(self.remote_port))
+        	self.logger.info("Initializing connection at %s" % (str(time.time())))
 
 	def connect(self):
     		#def create_packet(self, version=1, flags=0, senderID=0, txlocalID=0, txremoteID=0,
@@ -111,7 +131,30 @@ class Connection:
 			0, self.seq_no, self.ack_no, 1)  
 		self.server.sock.sendto(self.packet.build_packet(), (self.remote_ip, self.remote_port) )
 		self.state = Connection.State.HELLO_SENT
+		# TODO set timers
 
+	def hello_recv(self):
+		self.packet.create_packet(self.version, 0, self.server.sender_id, self.local_session_id,
+			self.remote_session_id, self.seq_no, self.ack_no, 1)  
+		self.server.sock.sendto(self.packet.build_packet(), (self.remote_ip, self.remote_port) )
+		self.state = Connection.State.HELLO_RECVD
+		# TODO set timers
+	
+	def handle(self, packet):
+		if packet.otype == 1 and self.state == Connection.State.HELLO_SENT:
+			self.remote_session_id = packet.txlocalID
+			self.packet.create_packet(self.version, 0, self.server.sender_id, self.local_session_id,
+				self.remote_session_id, self.seq_no, self.ack_no, 1)  
+			# TODO set remote sender id and ack no
+			self.server.sock.sendto(self.packet.build_packet(), (self.remote_ip, self.remote_port) )
+			self.state = Connection.State.CONNECTED
+			self.logger.info('state set to connected')
+		elif packet.otype == 1 and self.state == Connection.State.HELLO_RECVD:
+			self.state = Connection.State.CONNECTED
+			self.logger.info('state set to connected')
+		else:
+			self.logger.info('invalid packet or state')
+			
 	
 
 

@@ -14,6 +14,8 @@ TLVTYPE = {'CONTROL':1, 'DATA':2, 'SECURITY':3}
 RAWTLVTYPE = {1:'CONTROL', 2:'DATA', 3:'SECURITY'}
 OPERATION = {'HELLO':1, 'UPDATE':2, 'LIST':3, 'PULL':4, 'DATA':5}
 CODE = {'REQUEST':1, 'RESPONSE':2}
+REV_OPERATION = {1:'HELLO', 2:'UPDATE', 3:'LIST', 4:'PULL', 5:'DATA'}
+REV_CODE = {1:'REQUEST', 2:'RESPONSE'}
 
 class PacketManager():
     def __init__(self):
@@ -37,8 +39,15 @@ class PacketManager():
             self.txremoteID = txremoteID        #16bit
             self.sequence = sequence            #32bit
             self.ack = ack                      #32bit
-            self.otype = otype                  #8 bit
-            self.ocode = ocode                  #8 bit
+            if OPERATION.has_key(otype):
+                self.otype = OPERATION[otype]   #8 bit
+            else:
+                self.ocode = 0
+            if CODE.has_key(ocode):
+                self.ocode = CODE[ocode]        #8 bit
+            else:
+                self.otype = 0
+                
             self.checksum = 0                   #16bit
             
             if TLVlist is not None:
@@ -59,8 +68,18 @@ class PacketManager():
         self.sequence = ord(tempraw[8]) << 24 | ord(tempraw[9]) << 16 | ord(tempraw[10]) << 8 | ord(tempraw[11])
         self.ack = ord(tempraw[12]) << 24 | ord(tempraw[13]) << 16 | ord(tempraw[14]) << 8 | ord(tempraw[15])
         
-        self.otype = ord(tempraw[16])
-        self.ocode = ord(tempraw[17])
+        tmptype = ord(tempraw[16])
+        if REV_OPERATION.has_key(tmptype):
+            self.otype = tmptype
+        else:
+            self.logger.error("[packetize_raw] Process failed!! Failed to recover proper TYPE! %d" % (tmptype))
+            return False
+        tmpcode = ord(tempraw[17])
+        if REV_CODE.has_key(tmpcode):
+            self.ocode = tmpcode
+        else:
+            self.logger.error("[packetize_raw] Process failed!! Failed to recover proper CODE! %d" % (tmpcode))
+            return False
         self.checksum = ord(tempraw[18]) << 8 | ord(tempraw[19])
         
         if not self.verify_checksum():
@@ -111,6 +130,41 @@ class PacketManager():
         for item in infolist:
             tlventry = self.create_TLV_entry(item[0], item[1])
             self.TLVs.append(tlventry)
+
+    def get_version(self):
+        return self.version
+    
+    def get_flags(self):
+        return self.flags
+    
+    def get_senderID(self):
+        return self.senderID
+
+    def get_txlocalID(self):
+        return self.txlocalID
+    
+    def get_txremoteID(self):
+        return self.txremoteID
+
+    def get_sequence(self):
+        return self.sequence
+    
+    def get_ack(self):
+        return self.ack
+
+    def get_otype(self):
+        return REV_OPERATION[self.otype]
+    
+    def get_ocode(self):
+        return REV_CODE[self.ocode]
+    
+    def get_TLVlist(self):
+        tmplist = []
+        for item in self.TLVs:
+            tmplist.append((RAWTLVTYPE[item[0]],item[2]))
+        return tmplist
+    
+            
 
     def calculate_checksum(self):
         tempsum = 0L

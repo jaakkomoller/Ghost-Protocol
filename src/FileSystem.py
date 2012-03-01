@@ -1,4 +1,4 @@
-import hashlib, logging, os, sys, time
+import hashlib, logging, os, string, sys, thread, time
 from stat import *
 
 FILETYPE = 0
@@ -14,7 +14,72 @@ class FileSystem:
         self.private_dir = private_dir
         self.manifest_path = self.private_dir+'/'+'.manifest'
         self.set_private_folder()
+        self.exit_flag = False
+        self.thread_id = 0
+        self.hash_manifest = ''
+        self.starting_dic = {}
+        self.current_dic = {}
+        self.previous_dic = {}
+        self.diff_dic = {}
+        
+    def start_thread(self,):
+        self.thread_id = thread.start_new_thread(self.loop,())
+        
+    def loop(self,):
+        try:
+            flag = True
+            if self.exists_manifest():
+                self.logger.info("Found manifest file!")
+                self.starting_dic = self.read_manifest()
+            else:
+                self.logger.warning("Manifest file not found!")
+                self.starting_dic = self.get_file_list(1)
+                
+            print "\nInitial content of the manifest file"
+            self.print_manifest_dic(self.starting_dic)
+            self.current_dic = self.get_file_list(1)
+            
+            while not self.exit_flag:
+                #Sleep for 1 second and detect changes
+                time.sleep(1)
+                try:
+                    raw_input('')
+                except:
+                    continue
+    
+                if len(self.diff_dic) != 0:
+                    self.merge_manifest(self.current_dic, self.diff_dic)
+                if flag:
+                    self.diff_dic = self.diff_manifest(self.current_dic, self.starting_dic)
+                    self.previous_dic = self.current_dic
+                    flag = False
+                else:
+                    self.current_dic = self.get_file_list(1)
+                    
+                    self.diff_dic = self.diff_manifest(self.current_dic, self.previous_dic)
+                    print "\nPrinting diff dictionary"
+                    self.print_manifest_dic(self.diff_dic)
+                    print('\n')
+                    self.merge_manifest(self.current_dic, self.diff_dic)
+                    print "\nPrinting current dictionary"
+                    self.print_manifest_dic(self.current_dic)
+                    print('\n')
 
+                    self.previous_dic = self.current_dic
+                    #print self.get_local_manifest()
+                    
+                self.write_manifest(self.current_dic)
+                #Update hash manifest
+                self.hash_manifest = self.get_md5sum_hex(self.manifest_path, block_size=2**20)
+                print "hash_manifest", self.hash_manifest
+                
+        except Exception as e:
+            print "Something nasty happened!"
+            print e
+            
+    def terminate_thread(self):
+        self.exit_flag = True
+        
     def set_private_folder(self):
         try:
             os.chdir(self.root_path)
@@ -48,7 +113,7 @@ class FileSystem:
         for key,value in sorted(infodic.iteritems(), key=lambda (k,v): (v[FILETSTAMP],k), reverse=True):
             towrite = "%s\t%s\t%s\t%s\t%s" % (value[FILETYPE],value[FILEPATH],value[FILESIZE],value[FILETSTAMP],value[FILEHASH])
             fd.write(towrite+'\r\n')
-            self.logger.info(towrite)
+            #self.logger.debug(towrite)
         fd.close()
     
     def print_manifest(self, infolist):
@@ -60,13 +125,34 @@ class FileSystem:
             for key,value in sorted(infodic.iteritems(), key=lambda (k,v): (v[FILETSTAMP],k), reverse=True):
                 print "%s\t%s\t%s\t%s\t%s" % (value[FILETYPE],value[FILEPATH],value[FILESIZE],value[FILETSTAMP],value[FILEHASH])
     
+    def join_entries(self, itemlist, token):
+        tmplist = []
+        for item in itemlist:
+            tmplist.append(string.joinfields(item,token))
+        return tmplist
+    
     def get_sorted_list(self, infodic):
         sortedlist = []
         if len(infodic) != 0:
             for key,value in sorted(infodic.iteritems(), key=lambda (k,v): (v[FILETSTAMP],k), reverse=True):
                 sortedlist.append([value[FILETYPE],value[FILEPATH],value[FILESIZE],value[FILETSTAMP],value[FILEHASH]])
         return sortedlist
+    
+    def get_local_manifest(self):
+        current_list = self.get_sorted_list(self.previous_dic)
+        return self.join_entries(current_list, '?')
+    
+    def get_diff_manifest(self, new_manifest):
+        tmpdic = {}
         
+        for item in new_manifest:
+            tmpitem = item.split('?')
+            tmpdic[(tmpitem[0],tmpitem[1])] = tmpitem
+        
+        diffdic = self.diff_manifest(tmpdic, self.previous_dic)
+        return self.join_entries(self.get_sorted_list(diffdic), '?')
+            
+     
     def diff_manifest(self, newfile, oldfile):
         if len(newfile)==0 or len(oldfile)==0:
             return {}
@@ -76,10 +162,11 @@ class FileSystem:
             for newkey, newvalue in newfile.items():
                 if oldfile.has_key(newkey):
                     oldvalue = oldfile[newkey]
-                    if newvalue[FILETSTAMP]>oldvalue[FILETSTAMP]:
+                    if newvalue[FILETSTAMP]>oldvalue[FILETSTAMP] and newvalue[FILEHASH]!=oldvalue[FILEHASH]:
                         self.logger.debug("Updated file '%s'" % (newvalue[FILEPATH]))
                     else:
-                        self.logger.debug("No change in file '%s'" % (newvalue[FILEPATH]))
+                        #self.logger.debug("No change in file '%s'" % (newvalue[FILEPATH]))
+                        pass
                 else:
                     self.logger.debug("New file '%s'" % (newvalue[FILEPATH]))
                     diffdic[('NEW',newkey[0],newkey[1])]=newvalue
@@ -89,19 +176,18 @@ class FileSystem:
                     self.logger.debug("Ooops file removed '%s'" % (oldvalue[FILEPATH]))
                     print oldvalue
                     if oldkey[FILETYPE]=='DIR':
-                        print "Adding to difflist a deleted DIR"
+                        self.logger.debug("Adding to difflist a deleted DIR")
                         tmp = ('RMD',oldvalue[FILEPATH],oldvalue[FILESIZE],str(long(time.time())),oldvalue[FILEHASH])
                         diffdic[('DEL','RMD',oldvalue[FILEPATH])]=tmp
                     elif oldkey[FILETYPE]=='FIL':
-                        print "Adding to difflist a deleted FIL"
+                        self.logger.debug("Adding to difflist a deleted FIL")
                         tmp = ('RMF',oldvalue[FILEPATH],oldvalue[FILESIZE],str(long(time.time())),oldvalue[FILEHASH])
                         diffdic[('DEL','RMF',oldvalue[FILEPATH])]=tmp
                     elif oldkey[FILETYPE]=='RMD' or oldkey[FILETYPE]=='RMF':
-                        print "Adding to difflist a previously deleted record"
+                        self.logger.debug("Adding to difflist a previously deleted record")
                         diffdic[('CHK',oldvalue[FILETYPE],oldvalue[FILEPATH])]=oldvalue
                     else:
                         self.logger.error("Something nasty happened!")
-                    
                 
         else:
             print "The manifest is the same"
@@ -176,41 +262,6 @@ class FileSystem:
             md5.update(data)
         fd.close()
         return md5.hexdigest()
-
-    '''
-    def get_md5sum(self, filename, block_size=2**20):
-        fd = open(filename, 'r')
-        md5 = hashlib.md5()
-        while True:
-            data = fd.read(block_size)
-            if not data:
-                break
-            md5.update(data)
-        fd.close()
-        return md5.digest()
-        
-    def get_statistics(self, filename, deep=0):
-            filetype = ''
-            hashfile = 0
-            filesize = 0
-            file_stats = os.lstat(filename)
-            mode = file_stats[ST_MODE]
-            # For directories we only need to retrieve the type and timestamp.
-            # If a file inside the directory is modified also affects the directory's timestamp
-            if S_ISDIR(mode):
-                filetype = 'DIR'
-                timestamp = file_stats[ST_MTIME]
-            # For files we only need to retrieve all the information
-            elif S_ISREG(mode):
-                filetype = 'FIL'
-                if deep:
-                    hashfile = self.get_md5sum_hex(filename)
-                filesize =  file_stats[ST_SIZE]
-                timestamp = file_stats[ST_MTIME]
-            
-            fname = filename.lstrip(self.root_path)
-            result = (filetype,fname,filesize,timestamp,hashfile)
-            
-            self.complete_list.append(result)
-            return result
-    '''
+    
+    def get_hash_manifest(self):
+        return self.hash_manifest

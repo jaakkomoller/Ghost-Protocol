@@ -1,4 +1,4 @@
-import logging, sys, select, signal, string, thread, threading, time
+import logging, sys, signal, time
 
 from Configuration import *
 from FileSystem import *
@@ -38,85 +38,47 @@ class SyncCFT:
             i+=1
 
     def start_SyncCFT(self):
-        #print "Starting SyncCFT 1.0\n"
-        starting_dic = {}
-        current_dic = {}
-        previous_dic = {}
-        diff_dic = {}
-        flag = True
+        
         self.fsystem = FileSystem(self.folder, '.private')
         self.packetmanager = PacketManager()
         
-        if self.fsystem.exists_manifest():
-            self.logger.info("Found manifest file!")
-            starting_dic = self.fsystem.read_manifest()
-            
-        else:
-            self.logger.warning("Manifest file not found!")
-            starting_dic = self.fsystem.get_file_list(1)
-            
-        print "\nStarting manifest"
-        self.fsystem.print_manifest_dic(starting_dic)
-        current_dic = self.fsystem.get_file_list(1)
-        
+        self.fsystem.start_thread()
         
         while not self.exit_flag:
-            try:
-                raw_input('')
-            except:
-                continue
-
-            if len(diff_dic) != 0:
-                self.fsystem.merge_manifest(current_dic, diff_dic)
-            
-            if flag:
-                diff_dic = self.fsystem.diff_manifest(current_dic, starting_dic)
-                previous_dic = current_dic
-                flag = False
-            
-            else:
-                current_dic = self.fsystem.get_file_list(1)
-                
-                diff_dic = self.fsystem.diff_manifest(current_dic, previous_dic)
-            
-                self.fsystem.merge_manifest(current_dic, diff_dic)
-
-                print "\nPrinting current dictionary"
-                self.fsystem.print_manifest_dic(current_dic)
-                print('\n')
-                previous_dic = current_dic
-            
-                
-        self.fsystem.write_manifest(current_dic)
+            time.sleep(5)
         
+        mylist = ['FIL?f6?5?1330557437?0ac1b6ca8b53a5dc5c031382b981952f', 'FIL?f8?5?1330556921?5310dab750cabf7e2d1f307554874f9b', 'DIR?d1?0?1330026622?0', 'FIL?f3?6?1329785931?4c850c5b3b2756e67a91bad8e046ddac', 'FIL?f4?2?1329785778?b026324c6904b2a9cb4b88d6d61c81d1', 'FIL?f2?5?1329784733?e5828c564f71fea3a12dde8bd5d27063']
+        print "The difference of the manifests are..."
+        print self.fsystem.get_diff_manifest(mylist)
+        
+        self.fsystem.terminate_thread()
+
+        '''
         print "Creating the packet..."
-        self.packetmanager.create_packet(2, 15, 0, 'D', 43962, 52428, 56797, 3150765550, 85, 102, None, None)
+        self.packetmanager.create_packet(2, 15, 0xabcd,0xfeea, 0xfee0, 3150765550, 286331153, "HELLO", "REQUEST", None, None)
+        self.packetmanager.append_entry_to_TLVlist('DATA', 'data_test')
+        self.packetmanager.append_entry_to_TLVlist('CONTROL', 'control_test')
+        self.packetmanager.append_entry_to_TLVlist('SECURITY', 'security_test')
         
-        #self.packetmanager.append_entry_to_TLVlist('D', 'FIL?testfile1?000?456')
-        self.packetmanager.append_entry_to_TLVlist('D', 'test')
-        self.packetmanager.append_entry_to_TLVlist('D', 'test2')
-        #self.packetmanager.append_entry_to_TLVlist('D', 'FIL?testfile3?002?456')
-        
-        bpacket = self.packetmanager.build_packet()
-        
-        sraw = '\x2F\x44\xAB\xBA\xCC\xCC\xDD\xDD\xBB\xCC\xDD\xEE\x55\x66\x56\x69\x44\x00\x00\x34\x74\x65\x73\x74\xFF\x00\x00\x35\x74\x65\x73\x74\x33'
-        self.packetmanager.create_packet(rawdata=sraw)
-        
-        print "This is the packet returned: len()", len(bpacket)
-        print bpacket
-        
-        i=0
-        for item in bpacket:
-            if i%8 == 0:
-                print " ",
-            if i%16 == 0:
-                print "\n%d." % (i/16),
-            if item == '0':
-                print "00",
-            else:
-                print "%X" % (ord(item)),
-            i+=1
+        packet = self.packetmanager.build_packet()
+        self.packetmanager.hex_packet()
 
+        print "\n\n\n"
+        
+        print self.packetmanager.get_version()
+        print self.packetmanager.get_flags()
+        print self.packetmanager.get_senderID()
+        print self.packetmanager.get_txlocalID()
+        print self.packetmanager.get_txremoteID()
+        print self.packetmanager.get_sequence()
+        print self.packetmanager.get_ack()
+        print self.packetmanager.get_otype()
+        print self.packetmanager.get_ocode()
+        print self.packetmanager.get_TLVlist()
+        '''
+        
+        return
+        
     def signal_handler(self, signal, frame):
         self.logger.warning("You pressed Ctrl+C")
         print "\nYou pressed Ctrl+C!\n"

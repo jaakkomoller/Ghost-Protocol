@@ -152,7 +152,6 @@ class FileSystem:
         diffdic = self.diff_manifest(tmpdic, self.previous_dic)
         return self.join_entries(self.get_sorted_list(diffdic), '?')
             
-     
     def diff_manifest(self, newfile, oldfile):
         if len(newfile)==0 or len(oldfile)==0:
             return {}
@@ -188,7 +187,6 @@ class FileSystem:
                         diffdic[('CHK',oldvalue[FILETYPE],oldvalue[FILEPATH])]=oldvalue
                     else:
                         self.logger.error("Something nasty happened!")
-                
         else:
             print "The manifest is the same"
         return diffdic

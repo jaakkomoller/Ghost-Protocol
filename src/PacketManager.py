@@ -110,7 +110,6 @@ class PacketManager():
             i+=clen
             self.append_entry_to_TLVlist(RAWTLVTYPE[ctype],cvalue)
         
-     
     def create_TLV_entry(self, type, value):
         if len(value)>=10**TLVLENSIZE:
             self.logger.error("Error adding TLV %s:%s:%s" % (type, str(len(value)), value))
@@ -126,9 +125,9 @@ class PacketManager():
         if tlventry != None:
             self.TLVs.append(tlventry)
         
-    def append_list_to_TLVlist(self, infolist): #infolist coded as [(type,value)]
+    def append_list_to_TLVlist(self, type, infolist): #infolist coded as [value,value...]
         for item in infolist:
-            tlventry = self.create_TLV_entry(item[0], item[1])
+            tlventry = self.create_TLV_entry(type, item)
             self.TLVs.append(tlventry)
 
     def get_version(self):
@@ -161,9 +160,9 @@ class PacketManager():
     def get_TLVlist(self):
         tmplist = []
         for item in self.TLVs:
-            tmplist.append((RAWTLVTYPE[item[0]],item[2]))
+            #tmplist.append((RAWTLVTYPE[item[0]],item[2]))
+            tmplist.append(item[2])
         return tmplist
-    
             
 
     def calculate_checksum(self):

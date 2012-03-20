@@ -18,6 +18,8 @@ REV_OPERATION = {1:'HELLO', 2:'UPDATE', 3:'LIST', 4:'PULL', 5:'DATA'}
 REV_CODE = {1:'REQUEST', 2:'RESPONSE'}
 
 class PacketManager():
+    bytearrayTLV = ' '             #variable
+    TLVs = []                      #variable
     def __init__(self):
         self.logger = logging.getLogger("PacketManager")
         self.logger.info("PacketManager created")
@@ -25,9 +27,9 @@ class PacketManager():
     def create_packet(self, version=1, flags=0, senderID=0, txlocalID=0, txremoteID=0,
                       sequence=0, ack=0, otype=0, ocode=0, TLVlist=None, rawdata=None):
         
-        self.bytearrayTLV = ' '             #variable
-        self.TLVs = []                      #variable
-        
+    	del self.TLVs[:]
+    	self.bytearrayTLV = ' '
+
         if rawdata:
             self.packetize_raw(rawdata)
         else:
@@ -92,6 +94,7 @@ class PacketManager():
         i = 20
         ntype = 0
         while ntype != NULLTLV:
+            clen = 0
             #For the first TLV the type is in the header
             if i == 20:
                 ctype = self.nextTLV
@@ -104,7 +107,7 @@ class PacketManager():
                 temp = tempraw[i]
                 if ord(temp) == 0:
                     temp = '0'
-                clen = 10**(TLVLENSIZE-j-1) * int(temp)
+                clen += 10**(TLVLENSIZE-j-1) * int(temp)
                 i+=1
             cvalue = str(tempraw[i:i+clen])
             i+=clen
@@ -157,11 +160,13 @@ class PacketManager():
     def get_ocode(self):
         return REV_CODE[self.ocode]
     
-    def get_TLVlist(self):
+    def get_TLVlist(self, tlvtype=-1):
         tmplist = []
+	print self.TLVs
         for item in self.TLVs:
             #tmplist.append((RAWTLVTYPE[item[0]],item[2]))
-            tmplist.append(item[2])
+	    if tlvtype < 0 or tlvtype == item[0]:
+            	tmplist.append(item[2])
         return tmplist
             
 

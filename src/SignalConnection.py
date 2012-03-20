@@ -3,6 +3,7 @@ from threading import Thread
 
 from PacketManager import *
 from Configuration import *
+from FileSystem import *
 # TODO remove Configuration, sys and signal imports
 
 class SignalServer(Thread):
@@ -14,16 +15,20 @@ class SignalServer(Thread):
 	connection_list = [] # List of established connections
 	exit_flag = False
 	received_packet = None
+	fsystem = None
 
 	# TODO Throw error in case bind fails (Might do it already...)
-	def __init__(self, ip = "0.0.0.0", port = 5500):
+	def __init__(self, fsystem, ip = "0.0.0.0", port = 5500, sender_id = random.randint(0, 65536)):
 		Thread.__init__(self)
 
 		# TODO Think trough how the program should exit
         	#signal.signal(signal.SIGINT, self.signal_handler)
+		
+		self.fsystem = fsystem
+		self.sender_id = sender_id
 
         	self.logger = logging.getLogger("Signal server")
-        	self.logger.info("Initializing signal server at %s" % (str(time.time())))
+        	self.logger.info("Initializing signal server id: %d at %s" % (self.sender_id, str(time.time())))
 
     		self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 		self.sock.bind((ip, port))
@@ -76,7 +81,8 @@ class SignalServer(Thread):
 		for destination in destination_list:
 			self.logger.info('connecting to ' + destination[0] + ', ' + destination [1])
 			#self.sock.sendto("daddaa", (destination[0], int(destination[1])) )
-			connection = Connection(self, destination[0], int(destination[1]), self.get_new_session_id(random.randint(0, 65536)))
+			connection = Connection(self, destination[0], int(destination[1]),
+				self.get_new_session_id(random.randint(0, 65536)))
 			connection.connect()
 			self.connection_list.append(connection)
 	
@@ -138,7 +144,7 @@ class Connection:
 		self.packet.create_packet(version=self.version, flags=0, senderID=self.server.sender_id,
 			txlocalID=self.local_session_id, txremoteID=0, sequence=self.seq_no, otype='HELLO',
 			ocode='REQUEST')  
-		self.server.sock.sendto(self.packet.build_packet(), (self.remote_ip, self.remote_port) )
+		self.send_packet()
 		self.state = Connection.State.HELLO_SENT
 		# TODO set timers
 
@@ -148,11 +154,12 @@ class Connection:
 		self.packet.create_packet(version=self.version, flags=0, senderID=self.server.sender_id,
 			txlocalID=self.local_session_id, txremoteID=self.remote_session_id, sequence=self.seq_no,
 			ack=self.ack_no, otype='HELLO', ocode='RESPONSE')  
-		self.server.sock.sendto(self.packet.build_packet(), (self.remote_ip, self.remote_port) )
+		self.send_packet()
 		self.state = Connection.State.HELLO_RECVD
 		# TODO set timers
 	
 	def handle(self, packet):
+		self.ack_no = packet.sequence # TODO check that everything is received in the between.
 		if packet.otype == OPERATION['HELLO'] and packet.ocode == CODE['RESPONSE'] and \
 				self.state == Connection.State.HELLO_SENT:
 			self.remote_session_id = packet.txlocalID
@@ -160,15 +167,79 @@ class Connection:
 				txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
 				sequence=self.seq_no, ack=self.ack_no, otype='HELLO', ocode='RESPONSE')  
 			# TODO set remote sender id and ack no
-			self.server.sock.sendto(self.packet.build_packet(), (self.remote_ip, self.remote_port) )
+			self.send_packet()
 			self.state = Connection.State.CONNECTED
 			self.logger.info('state set to connected')
 		elif packet.otype == OPERATION['HELLO'] and packet.ocode == CODE['RESPONSE'] and \
 				self.state == Connection.State.HELLO_RECVD:
 			self.state = Connection.State.CONNECTED
 			self.logger.info('state set to connected')
+			self.send_update('REQUEST')
+		elif packet.otype == OPERATION['UPDATE'] and \
+				self.state == Connection.State.CONNECTED:
+			if packet.ocode == CODE['REQUEST']:
+				self.logger.info('update request received')
+			else:
+				self.logger.info('update response received')
+			for entry in packet.TLVs:
+				if entry[0] == TLVTYPE['DATA']:
+					self.logger.info('hash: %s' % entry[2])
+					if self.server.fsystem.get_hash_manifest() != entry[2]:
+						self.logger.info('hash files differ')
+						self.send_list_request()
+			if packet.ocode == CODE['REQUEST']:
+				self.send_update('RESPONSE')
+		elif packet.otype == OPERATION['LIST'] and packet.ocode == CODE['REQUEST'] and \
+				self.state == Connection.State.CONNECTED:
+			self.send_list_response()
+		elif packet.otype == OPERATION['LIST'] and packet.ocode == CODE['RESPONSE'] and \
+				self.state == Connection.State.CONNECTED:
+			tlvlist = packet.get_TLVlist(tlvtype=TLVTYPE['DATA'])
+			manifest = self.server.fsystem.get_diff_manifest(packet.get_TLVlist(tlvtype=TLVTYPE['DATA']))
+			self.logger.info('list response received. tlvlist:')
+			for entry in tlvlist:
+				self.logger.info(entry)
+			self.logger.info('diff:')
+			for entry in manifest:
+				self.logger.info(entry)
 		else:
 			self.logger.info('invalid packet or state')
+	
+	# ocode is either 'REQUEST' or 'RESPONSE'
+	def send_update(self, ocode):
+		self.packet.create_packet(version=self.version, flags=0, senderID=self.server.sender_id,
+			txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
+			sequence=self.seq_no, ack=self.ack_no, otype='UPDATE', ocode=ocode)  
+    		self.packet.append_entry_to_TLVlist('DATA', self.server.fsystem.get_hash_manifest())
+		self.send_packet()
+		# TODO set timers
+		self.logger.info('update sent, hash %s' % self.server.fsystem.get_hash_manifest())
+	
+	def send_list_request(self):
+		self.packet.create_packet(version=self.version, flags=0, senderID=self.server.sender_id,
+			txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
+			sequence=self.seq_no, ack=self.ack_no, otype='LIST', ocode='REQUEST')  
+		self.send_packet()
+		# TODO set timers
+		self.logger.info('List request sent')
+	
+	def send_list_response(self):
+		self.packet.create_packet(version=self.version, flags=0, senderID=self.server.sender_id,
+			txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
+			sequence=self.seq_no, ack=self.ack_no, otype='LIST', ocode='RESPONSE')  
+    		self.packet.append_list_to_TLVlist('DATA', self.server.fsystem.get_local_manifest())
+		self.send_packet()
+		# TODO set timers
+		self.logger.info('List response sent. local manifest:')
+		for entry in self.server.fsystem.get_local_manifest():
+			self.logger.debug(entry)
+		
+
+	def send_packet(self):
+		self.server.sock.sendto(self.packet.build_packet(), (self.remote_ip, self.remote_port) )
+		self.seq_no = self.seq_no + 1
+    		del self.packet.TLVs[:] # TODO this should be done in packetmanager.
+		self.logger.info('Packet sent')
 			
 	
 
@@ -201,7 +272,13 @@ def main():
 	for peer in peers:
         	logger.info("%s, %s" % (peer[0], peer[1]))
 
-	server = SignalServer(port = int(port))
+        fsystem = FileSystem(folder, '.private')
+        fsystem.start_thread()
+	
+	# Sleep a while, so we have an up-to-date manifest TODO Not sure manifest is done.
+	time.sleep(2)
+
+	server = SignalServer(fsystem = fsystem, port = int(port), sender_id = random.randint(0, 65536))
 
 	server.init_connections(peers)
 	server.start()
@@ -212,6 +289,7 @@ def main():
 			logger.info('CTRL+C received, killing server...')
 			server.stop()
 		
+        fsystem.terminate_thread()
 #	def init_connections(self, destination_list):
 #	def __init__(self, ip = "127.0.0.1", port = 5500):
 

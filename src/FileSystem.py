@@ -40,12 +40,10 @@ class FileSystem:
             self.current_dic = self.get_file_list(1)
             
             while not self.exit_flag:
-                #Sleep for 1 second and detect changes
-                time.sleep(1)
-                try:
-                    raw_input('')
-                except:
-                    continue
+                #try:
+                #    raw_input('')
+                #except:
+                #    continue
     
                 if len(self.diff_dic) != 0:
                     self.merge_manifest(self.current_dic, self.diff_dic)
@@ -57,13 +55,13 @@ class FileSystem:
                     self.current_dic = self.get_file_list(1)
                     
                     self.diff_dic = self.diff_manifest(self.current_dic, self.previous_dic)
-                    print "\nPrinting diff dictionary"
-                    self.print_manifest_dic(self.diff_dic)
-                    print('\n')
+                    #print "\nPrinting diff dictionary"
+                    #self.print_manifest_dic(self.diff_dic)
+                    #print('\n')
                     self.merge_manifest(self.current_dic, self.diff_dic)
-                    print "\nPrinting current dictionary"
-                    self.print_manifest_dic(self.current_dic)
-                    print('\n')
+                    #print "\nPrinting current dictionary"
+                    #self.print_manifest_dic(self.current_dic)
+                    #print('\n')
 
                     self.previous_dic = self.current_dic
                     #print self.get_local_manifest()
@@ -71,7 +69,9 @@ class FileSystem:
                 self.write_manifest(self.current_dic)
                 #Update hash manifest
                 self.hash_manifest = self.get_md5sum_hex(self.manifest_path, block_size=2**20)
-                print "hash_manifest", self.hash_manifest
+                #print "hash_manifest", self.hash_manifest
+                #Sleep for 1 second and detect changes
+                time.sleep(1)
                 
         except Exception as e:
             print "Something nasty happened!"
@@ -172,24 +172,25 @@ class FileSystem:
             
             for oldkey, oldvalue in oldfile.items():
                 if not newfile.has_key(oldkey):
-                    self.logger.debug("Ooops file removed '%s'" % (oldvalue[FILEPATH]))
-                    print oldvalue
+                    #self.logger.debug("Ooops file removed '%s'" % (oldvalue[FILEPATH]))
+                    #print oldvalue
                     if oldkey[FILETYPE]=='DIR':
-                        self.logger.debug("Adding to difflist a deleted DIR")
+                        #self.logger.debug("Adding to difflist a deleted DIR")
                         tmp = ('RMD',oldvalue[FILEPATH],oldvalue[FILESIZE],str(long(time.time())),oldvalue[FILEHASH])
                         diffdic[('DEL','RMD',oldvalue[FILEPATH])]=tmp
                     elif oldkey[FILETYPE]=='FIL':
-                        self.logger.debug("Adding to difflist a deleted FIL")
+                        #self.logger.debug("Adding to difflist a deleted FIL")
                         tmp = ('RMF',oldvalue[FILEPATH],oldvalue[FILESIZE],str(long(time.time())),oldvalue[FILEHASH])
                         diffdic[('DEL','RMF',oldvalue[FILEPATH])]=tmp
                     elif oldkey[FILETYPE]=='RMD' or oldkey[FILETYPE]=='RMF':
-                        self.logger.debug("Adding to difflist a previously deleted record")
+                        #self.logger.debug("Adding to difflist a previously deleted record")
                         diffdic[('CHK',oldvalue[FILETYPE],oldvalue[FILEPATH])]=oldvalue
                     else:
                         self.logger.error("Something nasty happened!")
         else:
-            print "The manifest is the same"
-        return diffdic
+            #print "The manifest is the same"
+            pass
+	return diffdic
    
 
     def merge_manifest(self, currentdic, diffdic):
@@ -199,7 +200,7 @@ class FileSystem:
         for key,value in diffdic.items():
             #print "Item ", value
             if key[0] == 'DEL':
-                self.logger.debug("Adding entry in merger %s : %s" % (value[0],value[1]))
+                #self.logger.debug("Adding entry in merger %s : %s" % (value[0],value[1]))
                 currentdic[(key[1],key[2])]=[value[0],value[1],value[2],value[3],value[4]]
             elif key[0] == 'CHK':
                 #This happens when there is a DEL old record

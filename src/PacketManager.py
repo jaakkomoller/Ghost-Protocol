@@ -56,6 +56,9 @@ class PacketManager():
                 self.append_list_to_TLVlist(TLVlist)
     
     def packetize_raw(self, rawdata):
+    	del self.TLVs[:]
+    	self.bytearrayTLV = ' '
+	
         tempraw = rawdata
         
         tmpbyte = ord(tempraw[0])

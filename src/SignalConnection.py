@@ -18,7 +18,7 @@ class SignalServer(Thread):
 	fsystem = None
 
 	# TODO Throw error in case bind fails (Might do it already...)
-	def __init__(self, fsystem, ip = "0.0.0.0", port = 5500, sender_id = random.randint(0, 65536)):
+	def __init__(self, fsystem, ip = "0.0.0.0", port = 5500, sender_id = random.randint(0, 65535)):
 		Thread.__init__(self)
 
 		# TODO Think trough how the program should exit
@@ -63,8 +63,8 @@ class SignalServer(Thread):
 			if not found and self.received_packet.otype == OPERATION['HELLO'] and \
 					self.received_packet.ocode == CODE['REQUEST'] :
 				connection = Connection(self, addr[0], addr[1], 
-					self.get_new_session_id(random.randint(0, 65536)), self.received_packet.txlocalID,
-					self.received_packet.version, random.randint(0, 65536))
+					self.get_new_session_id(random.randint(0, 65535)), self.received_packet.txlocalID,
+					self.received_packet.version, random.randint(0, 65535))
 				connection.hello_recv(self.received_packet.sequence)
 				self.connection_list.append(connection)
 				self.logger.info("hello packet received, new connection established\
@@ -82,15 +82,15 @@ class SignalServer(Thread):
 			self.logger.info('connecting to ' + destination[0] + ', ' + destination [1])
 			#self.sock.sendto("daddaa", (destination[0], int(destination[1])) )
 			connection = Connection(self, destination[0], int(destination[1]),
-				self.get_new_session_id(random.randint(0, 65536)))
+				self.get_new_session_id(random.randint(0, 65535)))
 			connection.connect()
 			self.connection_list.append(connection)
 	
-	# Returns an unigue local session_id. Takes a random number from 0 to 65536 as a parameter.
+	# Returns an unigue local session_id. Takes a random number from 0 to 65535 as a parameter.
 	def get_new_session_id(self, rand_no):
 		for connection in self.connection_list:
 			if rand_no == connection.local_session_id:
-				return get_new_session_id(random.randint(0, 65536))
+				return get_new_session_id(random.randint(0, 65535))
 		return rand_no
 
 	def stop(self):
@@ -202,6 +202,42 @@ class Connection:
 			self.logger.info('diff:')
 			for entry in manifest:
 				self.logger.info(entry)
+				if entry.split('?')[0] == 'FIL':
+					self.send_fetch_file(entry.split('?')[1])
+		elif packet.otype == OPERATION['PULL'] and packet.ocode == CODE['REQUEST'] and \
+				self.state == Connection.State.CONNECTED:
+			tlvlist = packet.get_TLVlist(tlvtype=TLVTYPE['DATA'])
+			if len(tlvlist) == 0:
+				return
+			filename = tlvlist[0]
+
+			tlvlist = packet.get_TLVlist(tlvtype=TLVTYPE['CONTROL'])
+			remote_port = -1
+			remote_tx_id = -1
+			for tlv in tlvlist:
+				# TODO check lengths
+				if tlv.split('?')[0] == 'local_tx_id':
+					remote_tx_id = int(tlv.split('?')[1])
+				elif tlv.split('?')[0] == 'local_port':
+					remote_port = int(tlv.split('?')[1])
+			if remote_port >= 0 and remote_tx_id >= 0:
+				self.send_fetch_file_response(remote_tx_id, remote_port)
+		elif packet.otype == OPERATION['PULL'] and packet.ocode == CODE['RESPONSE'] and \
+				self.state == Connection.State.CONNECTED:
+			tlvlist = packet.get_TLVlist(tlvtype=TLVTYPE['CONTROL'])
+			remote_port = -1
+			remote_tx_id = -1
+			for tlv in tlvlist:
+				# TODO check lengths
+				if tlv.split('?')[0] == 'local_tx_id':
+					remote_tx_id = int(tlv.split('?')[1])
+				elif tlv.split('?')[0] == 'local_port':
+					remote_port = int(tlv.split('?')[1])
+			# TODO Launch Tomi's code here
+			tlv_string = ""
+			for tlv in packet.TLVs:
+				tlv_string += tlv[2] + ","
+			self.logger.info('pull response received, tlvs: %s' % tlv_string)
 		else:
 			self.logger.info('invalid packet or state')
 	
@@ -233,7 +269,43 @@ class Connection:
 		self.logger.info('List response sent. local manifest:')
 		for entry in self.server.fsystem.get_local_manifest():
 			self.logger.debug(entry)
-		
+
+	def send_fetch_file(self, filename):
+		# TODO Get port and tx id from Tomi's code
+		# TODO Lock the fetched file somehow
+		# TODO implement state change with cookie
+		local_tx_id = random.randint(0, 65535)
+		local_data_port = random.randint(1500, 3000)
+		self.packet.create_packet(version=self.version, flags=0, senderID=self.server.sender_id,
+			txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
+			sequence=self.seq_no, ack=self.ack_no, otype='PULL', ocode='REQUEST')
+		self.packet.append_entry_to_TLVlist('DATA', filename)
+		self.packet.append_entry_to_TLVlist('CONTROL', 'local_tx_id?%d' % local_tx_id)
+		self.packet.append_entry_to_TLVlist('CONTROL', 'local_port?%d' % local_data_port)
+		tlv_string = ""
+		for tlv in self.packet.TLVs:
+			tlv_string += tlv[2] + ","
+		self.send_packet()
+		# TODO set timers
+		self.logger.info('pull request sent, tlvs: %s' % tlv_string)
+
+	def send_fetch_file_response(self, remote_tx_id, remote_data_port):
+		# TODO get these from Tomis code.
+		# TODO Lock the fetched file somehow
+		local_tx_id = random.randint(0, 65535)
+		local_data_port = random.randint(1500, 3000)
+		self.packet.create_packet(version=self.version, flags=0, senderID=self.server.sender_id,
+			txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
+			sequence=self.seq_no, ack=self.ack_no, otype='PULL', ocode='RESPONSE')
+		self.packet.append_entry_to_TLVlist('CONTROL', 'remote_tx_id?%d' % remote_tx_id)
+		self.packet.append_entry_to_TLVlist('CONTROL', 'remote_port?%d' % remote_data_port)
+		self.packet.append_entry_to_TLVlist('CONTROL', 'local_tx_id?%d' % local_tx_id)
+		self.packet.append_entry_to_TLVlist('CONTROL', 'local_port?%d' % local_data_port)
+		tlv_string = ""
+		for tlv in self.packet.TLVs:
+			tlv_string += tlv[2] + ","
+		self.send_packet()
+		self.logger.info('pull response sent, tlvs: %s' % tlv_string)
 
 	def send_packet(self):
 		self.server.sock.sendto(self.packet.build_packet(), (self.remote_ip, self.remote_port) )
@@ -241,8 +313,6 @@ class Connection:
 		del self.packet.TLVs[:] # TODO this should be done in packetmanager.
 		self.logger.info('Packet sent')
 			
-	
-
 
 # For testing purposes
 # TODO Remove this
@@ -278,7 +348,7 @@ def main():
 	# Sleep a while, so we have an up-to-date manifest TODO Not sure manifest is done.
 	time.sleep(2)
 
-	server = SignalServer(fsystem = fsystem, port = int(port), sender_id = random.randint(0, 65536))
+	server = SignalServer(fsystem = fsystem, port = int(port), sender_id = random.randint(0, 65535))
 
 	server.init_connections(peers)
 	server.start()

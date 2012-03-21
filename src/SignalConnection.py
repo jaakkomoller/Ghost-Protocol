@@ -22,15 +22,15 @@ class SignalServer(Thread):
 		Thread.__init__(self)
 
 		# TODO Think trough how the program should exit
-        	#signal.signal(signal.SIGINT, self.signal_handler)
+		#signal.signal(signal.SIGINT, self.signal_handler)
 		
 		self.fsystem = fsystem
 		self.sender_id = sender_id
 
-        	self.logger = logging.getLogger("Signal server")
-        	self.logger.info("Initializing signal server id: %d at %s" % (self.sender_id, str(time.time())))
+		self.logger = logging.getLogger("Signal server")
+		self.logger.info("Initializing signal server id: %d at %s" % (self.sender_id, str(time.time())))
 
-    		self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+		self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 		self.sock.bind((ip, port))
 		self.sock.settimeout(0.5) # So we can exit and wont block forever in recvfrom
 
@@ -39,7 +39,7 @@ class SignalServer(Thread):
 
 	def run(self):
 		
-        	self.logger.info("Server started at %s" % (str(time.time())))
+		self.logger.info("Server started at %s" % (str(time.time())))
 		while self.exit_flag == False:
 			try:
 				data, addr = self.sock.recvfrom(self.buf_size)
@@ -123,23 +123,23 @@ class Connection:
 	def __init__(self, server, remote_ip, remote_port, local_session_id, remote_session_id = 0,
 			version = 1, seq_no = 1000):
 		self.server = server     # Pointer to server (for shared info, such as Sender ID)
-        	self.version = version
-        	self.remote_ip = remote_ip
-        	self.remote_port = remote_port
-        	self.seq_no = seq_no
-        	self.sent_ack_no = 0
-        	self.recv_ack_no = 0
-        	self.local_session_id = local_session_id
-        	self.remote_session_id = remote_session_id
+		self.version = version
+		self.remote_ip = remote_ip
+		self.remote_port = remote_port
+		self.seq_no = seq_no
+		self.sent_ack_no = 0
+		self.recv_ack_no = 0
+		self.local_session_id = local_session_id
+		self.remote_session_id = remote_session_id
 		self.packet = PacketManager()
 		self.state = Connection.State.UNCONNECTED
 
-        	self.logger = logging.getLogger("Connection to " + str(self.remote_ip) + ':' + str(self.remote_port))
-        	self.logger.info("Initializing connection at %s" % (str(time.time())))
+		self.logger = logging.getLogger("Connection to " + str(self.remote_ip) + ':' + str(self.remote_port))
+		self.logger.info("Initializing connection at %s" % (str(time.time())))
 
 	def connect(self):
-    		#def create_packet(self, version=1, flags=0, senderID=0, txlocalID=0, txremoteID=0,
-                #     sequence=0, ack=0, otype=0, ocode=0, TLVlist=None, rawdata=None):
+		#def create_packet(self, version=1, flags=0, senderID=0, txlocalID=0, txremoteID=0,
+#     sequence=0, ack=0, otype=0, ocode=0, TLVlist=None, rawdata=None):
 		# Packet manager should be able to build hello packets (i.e. set remote session id)
 		self.packet.create_packet(version=self.version, flags=0, senderID=self.server.sender_id,
 			txlocalID=self.local_session_id, txremoteID=0, sequence=self.seq_no, otype='HELLO',
@@ -210,7 +210,7 @@ class Connection:
 		self.packet.create_packet(version=self.version, flags=0, senderID=self.server.sender_id,
 			txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
 			sequence=self.seq_no, ack=self.ack_no, otype='UPDATE', ocode=ocode)  
-    		self.packet.append_entry_to_TLVlist('DATA', self.server.fsystem.get_hash_manifest())
+		self.packet.append_entry_to_TLVlist('DATA', self.server.fsystem.get_hash_manifest())
 		self.send_packet()
 		# TODO set timers
 		self.logger.info('update sent, hash %s' % self.server.fsystem.get_hash_manifest())
@@ -227,7 +227,7 @@ class Connection:
 		self.packet.create_packet(version=self.version, flags=0, senderID=self.server.sender_id,
 			txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
 			sequence=self.seq_no, ack=self.ack_no, otype='LIST', ocode='RESPONSE')  
-    		self.packet.append_list_to_TLVlist('DATA', self.server.fsystem.get_local_manifest())
+		self.packet.append_list_to_TLVlist('DATA', self.server.fsystem.get_local_manifest())
 		self.send_packet()
 		# TODO set timers
 		self.logger.info('List response sent. local manifest:')
@@ -238,7 +238,7 @@ class Connection:
 	def send_packet(self):
 		self.server.sock.sendto(self.packet.build_packet(), (self.remote_ip, self.remote_port) )
 		self.seq_no = self.seq_no + 1
-    		del self.packet.TLVs[:] # TODO this should be done in packetmanager.
+		del self.packet.TLVs[:] # TODO this should be done in packetmanager.
 		self.logger.info('Packet sent')
 			
 	
@@ -255,25 +255,25 @@ def main():
 	console.setFormatter(formatter)
 	logging.getLogger('').addHandler(console)
 
-        logger = logging.getLogger("Test main in SignalConnection")
+	logger = logging.getLogger("Test main in SignalConnection")
 
-        config = Configuration(sys.argv)
-        conf_values = config.load_configuration()
-        if not conf_values:
-            logger.error("An error occurred while loading the configuration!")
-            return
-        
-        (port, folder, p_prob, q_prob, peers) = conf_values
-        #Logging of configuration 
-        logger.info("Listening on UDP port %s" % (str(port)))
-        logger.info("'p' parameter: %s" % (str(p_prob)))
-        logger.info("'q' parameter: %s" % (str(q_prob)))
+	config = Configuration(sys.argv)
+	conf_values = config.load_configuration()
+	if not conf_values:
+		logger.error("An error occurred while loading the configuration!")
+		return
+
+	(port, folder, p_prob, q_prob, peers) = conf_values
+	#Logging of configuration 
+	logger.info("Listening on UDP port %s" % (str(port)))
+	logger.info("'p' parameter: %s" % (str(p_prob)))
+	logger.info("'q' parameter: %s" % (str(q_prob)))
 	logger.info("Peers to connect:")
 	for peer in peers:
-        	logger.info("%s, %s" % (peer[0], peer[1]))
+		logger.info("%s, %s" % (peer[0], peer[1]))
 
-        fsystem = FileSystem(folder, '.private')
-        fsystem.start_thread()
+	fsystem = FileSystem(folder, '.private')
+	fsystem.start_thread()
 	
 	# Sleep a while, so we have an up-to-date manifest TODO Not sure manifest is done.
 	time.sleep(2)
@@ -289,9 +289,9 @@ def main():
 			logger.info('CTRL+C received, killing server...')
 			server.stop()
 		
-        fsystem.terminate_thread()
-#	def init_connections(self, destination_list):
-#	def __init__(self, ip = "127.0.0.1", port = 5500):
+	fsystem.terminate_thread()
+	#	def init_connections(self, destination_list):
+	#	def __init__(self, ip = "127.0.0.1", port = 5500):
 
 # TODO Remove this
 main()

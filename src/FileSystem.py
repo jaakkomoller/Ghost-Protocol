@@ -31,20 +31,25 @@ class FileSystem:
             if self.exists_manifest():
                 self.logger.info("Found manifest file!")
                 self.starting_dic = self.read_manifest()
+                self.current_dic = self.get_file_list(1)
             else:
-                self.logger.warning("Manifest file not found!")
+                #self.logger.warning("Manifest file not found!")
                 self.starting_dic = self.get_file_list(1)
+                self.current_dic = self.starting_dic
                 
             print "\nInitial content of the manifest file"
             self.print_manifest_dic(self.starting_dic)
-            self.current_dic = self.get_file_list(1)
+            #self.current_dic = self.get_file_list(1)
             
             while not self.exit_flag:
-                #try:
-                #    raw_input('')
-                #except:
-                #    continue
-    
+                #print "\n************************************************************************"
+                '''
+                try:
+                    raw_input('')
+                except:
+                    continue
+                '''
+                '''
                 if len(self.diff_dic) != 0:
                     self.merge_manifest(self.current_dic, self.diff_dic)
                 if flag:
@@ -52,30 +57,34 @@ class FileSystem:
                     self.previous_dic = self.current_dic
                     flag = False
                 else:
-                    self.current_dic = self.get_file_list(1)
-                    
-                    self.diff_dic = self.diff_manifest(self.current_dic, self.previous_dic)
-                    #print "\nPrinting diff dictionary"
-                    #self.print_manifest_dic(self.diff_dic)
-                    #print('\n')
-                    self.merge_manifest(self.current_dic, self.diff_dic)
-                    #print "\nPrinting current dictionary"
-                    #self.print_manifest_dic(self.current_dic)
-                    #print('\n')
+                '''
+                self.current_dic = self.get_file_list(1)
+                
+                self.diff_dic = self.diff_manifest(self.current_dic, self.previous_dic)
+                #print "\nPrinting diff dictionary from current to previous"
+                #self.print_manifest_dic(self.diff_dic)
+                #print('\n')
+                self.merge_manifest(self.current_dic, self.diff_dic)
+                #print "\nPrinting current dictionary"
+                #self.print_manifest_dic(self.current_dic)
+                #print('\n')
 
-                    self.previous_dic = self.current_dic
-                    #print self.get_local_manifest()
+                self.previous_dic = self.current_dic
+                print "\nThis is the actual manifest file"
+                #print self.get_local_manifest()
+                self.print_manifest_dic(self.current_dic)
+                #print('\n')
                     
                 self.write_manifest(self.current_dic)
                 #Update hash manifest
                 self.hash_manifest = self.get_md5sum_hex(self.manifest_path, block_size=2**20)
                 #print "hash_manifest", self.hash_manifest
                 #Sleep for 1 second and detect changes
-                time.sleep(1)
+                time.sleep(5)
                 
         except Exception as e:
             print "Something nasty happened!"
-            print e
+            print e.args
             
     def terminate_thread(self):
         self.exit_flag = True
@@ -93,7 +102,7 @@ class FileSystem:
 
     def exists_manifest(self):
         if not os.access(self.manifest_path, os.W_OK):
-            self.logger.warning("manifest file not found!")
+            self.logger.warning("Manifest file not found!")
             return False
         return True
 
@@ -151,6 +160,16 @@ class FileSystem:
         
         diffdic = self.diff_manifest(tmpdic, self.previous_dic)
         return self.join_entries(self.get_sorted_list(diffdic), '?')
+
+    def get_diff_manifest_remote(self, remote_manifest):
+        tmpdic = {}
+        
+        for item in remote_manifest:
+            tmpitem = item.split('?')
+            tmpdic[(tmpitem[0],tmpitem[1])] = tmpitem
+        
+        diffdic = self.diff_manifest_remote(tmpdic, self.previous_dic)
+        return self.join_entries(self.get_sorted_list(diffdic), '?')
             
     def diff_manifest(self, newfile, oldfile):
         if len(newfile)==0 or len(oldfile)==0:
@@ -190,8 +209,45 @@ class FileSystem:
         else:
             #print "The manifest is the same"
             pass
-	return diffdic
+        return diffdic
    
+
+    def diff_manifest_remote(self, remotefile, localfile):
+        #if len(remotefile)==0 or len(localfile)==0:
+        #    return {}
+        diffdic  = {}
+        
+        if len(localfile)==0:
+            return remotefile
+        
+        if remotefile != localfile:
+            for remotekey, remotevalue in remotefile.items():
+                if localfile.has_key(remotekey):
+                    localvalue = localfile[remotekey]
+                    if remotevalue[FILETSTAMP]>localvalue[FILETSTAMP] and (remotevalue[0]=='RMF' or remotevalue[0]=='RMD'):
+                        self.logger.debug("Update local timestamp of a deleted file '%s'" % (remotevalue[FILEPATH]))
+                        localvalue[FILETSTAMP] = remotevalue[FILETSTAMP]
+                        
+                    elif remotevalue[FILETSTAMP]>localvalue[FILETSTAMP] and remotevalue[FILEHASH]!=localvalue[FILEHASH]:
+                        self.logger.debug("Updated file '%s'" % (remotevalue[FILEPATH]))
+                        diffdic[('NEW',remotekey[0],remotekey[1])]=remotevalue
+                    else:
+                        #self.logger.debug("No change in file '%s'" % (newvalue[FILEPATH]))
+                        pass
+                else:
+                    self.logger.debug("New entry-file '%s'" % (remotevalue[FILEPATH]))
+                    if remotevalue[0]=='RMF' or remotevalue[0]=='RMD':
+                        print "Adding a remote RMF/RMD to our local manifest"
+                        localfile[remotekey] = remotevalue
+                    else:
+                        diffdic[('NEW',remotekey[0],remotekey[1])]=remotevalue
+
+        else:
+            self.logger.debug("The manifest is the same")
+            pass
+        return diffdic
+   
+
 
     def merge_manifest(self, currentdic, diffdic):
         if len(currentdic)==0 or len(diffdic) == 0:
@@ -209,7 +265,7 @@ class FileSystem:
                 elif key[1]=='RMF':
                     etype = 'FIL'
                 if currentdic.has_key((etype,value[1])):
-                    #print "New entry over a deleted one has been found!", value[1]
+                    #print "New entry over a deleted one has been found! %s:%s" % (str(etype),str(value[1]))
                     pass
                 else:
                     #print "Still no new entry over the deleted file! Leaving in dic. ", value[1]

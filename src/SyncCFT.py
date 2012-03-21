@@ -44,13 +44,21 @@ class SyncCFT:
         
         self.fsystem.start_thread()
         
-        while not self.exit_flag:
-            time.sleep(5)
+        try:
+            while not self.exit_flag:
+                time.sleep(5)
+        except Exception:
+            pass
         
-        mylist = ['FIL?f6?5?1330557437?0ac1b6ca8b53a5dc5c031382b981952f', 'FIL?f8?5?1330556921?5310dab750cabf7e2d1f307554874f9b', 'DIR?d1?0?1330026622?0', 'FIL?f3?6?1329785931?4c850c5b3b2756e67a91bad8e046ddac', 'FIL?f4?2?1329785778?b026324c6904b2a9cb4b88d6d61c81d1', 'FIL?f2?5?1329784733?e5828c564f71fea3a12dde8bd5d27063']
+        print "\n++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++"
+        print "Here comes our new coding!!\n"
+        mylist = ['FIL?f1?5?1330560662?5310dab750cabf7e2d1f307554874f9a','RMF?f3?11?1339999999?a73c45107081c08dd4560206b8ef8205']
         print "The difference of the manifests are..."
-        print self.fsystem.get_diff_manifest(mylist)
+        print self.fsystem.get_diff_manifest_remote(mylist)
+        print "\n++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++"
         
+        print self.fsystem.current_dic
+           
         self.fsystem.terminate_thread()
 
         '''

@@ -76,7 +76,7 @@ class SignalServer(Thread):
 	def init_connections(self, destination_list):
 		
 		# todo create hello packet
-        	#self.packetmanager.create_packet(2, 15, 43962, 52428, 56797, 3150765550, 286331153, 85, 102, None, None)
+		#self.packetmanager.create_packet(2, 15, 43962, 52428, 56797, 3150765550, 286331153, 85, 102, None, None)
 
 		for destination in destination_list:
 			self.logger.info('connecting to ' + destination[0] + ', ' + destination [1])

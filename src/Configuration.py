@@ -4,8 +4,8 @@ class Configuration():
     param = 0
     default_port = 4321
     port = 0
-    p_prob = 0
-    q_prob = 0
+    p_prob = 0.0
+    q_prob = 1.0
     folder = ''
     peers = []
     
@@ -68,8 +68,8 @@ class Configuration():
                 self.p_prob = 1.0 - self.q_prob
         
         elif not self.p_prob and not self.q_prob:
-            self.p_prob=1
-            self.q_prob=1
+            self.p_prob=0.0
+            self.q_prob=1.0
             self.logger.warning("Q and P probabilities are not set")
         
         for peer in temp_list:

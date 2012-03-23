@@ -70,9 +70,9 @@ class FileSystem:
                 #print('\n')
 
                 self.previous_dic = self.current_dic
-                print "\nThis is the actual manifest file"
+                #print "\nThis is the actual manifest file"
                 #print self.get_local_manifest()
-                self.print_manifest_dic(self.current_dic)
+                #self.print_manifest_dic(self.current_dic)
                 #print('\n')
                     
                 self.write_manifest(self.current_dic)

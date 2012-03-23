@@ -18,9 +18,9 @@ REV_OPERATION = {1:'HELLO', 2:'UPDATE', 3:'LIST', 4:'PULL', 5:'DATA'}
 REV_CODE = {1:'REQUEST', 2:'RESPONSE'}
 
 class PacketManager():
-    bytearrayTLV = ' '             #variable
-    TLVs = []                      #variable
     def __init__(self):
+    	self.bytearrayTLV = ' '             #variable
+    	self.TLVs = []                      #variable
         self.logger = logging.getLogger("PacketManager")
         self.logger.info("PacketManager created")
         
@@ -283,3 +283,15 @@ class PacketManager():
                     r=r+i2
             print r
             i += 16
+
+
+class OutPacket(PacketManager):
+    send_time = 0.0
+    def __init__(self):
+        PacketManager.__init__(self)
+
+class InPacket(PacketManager):
+    receive_time = 0.0
+    def __init__(self):
+        PacketManager.__init__(self)
+

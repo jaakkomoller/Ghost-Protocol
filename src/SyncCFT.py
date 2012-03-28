@@ -61,9 +61,9 @@ class SyncCFT:
            
         self.fsystem.terminate_thread()
 
-        '''
+        
         print "Creating the packet..."
-        self.packetmanager.create_packet(2, 15, 0xabcd,0xfeea, 0xfee0, 3150765550, 286331153, "HELLO", "REQUEST", None, None)
+        self.packetmanager.create_packet(2, ['ACK','SEC'], 0xabcd,0xfeea, 0xfee0, 3150765550, 286331153, "HELLO", "REQUEST", None, None)
         self.packetmanager.append_entry_to_TLVlist('DATA', 'data_test')
         self.packetmanager.append_entry_to_TLVlist('CONTROL', 'control_test')
         self.packetmanager.append_entry_to_TLVlist('SECURITY', 'security_test')
@@ -83,7 +83,7 @@ class SyncCFT:
         print self.packetmanager.get_otype()
         print self.packetmanager.get_ocode()
         print self.packetmanager.get_TLVlist()
-        '''
+        
         
         return
         

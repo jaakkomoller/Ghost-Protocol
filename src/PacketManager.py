@@ -16,25 +16,28 @@ OPERATION = {'HELLO':1, 'UPDATE':2, 'LIST':3, 'PULL':4, 'DATA':5}
 CODE = {'REQUEST':1, 'RESPONSE':2}
 REV_OPERATION = {1:'HELLO', 2:'UPDATE', 3:'LIST', 4:'PULL', 5:'DATA'}
 REV_CODE = {1:'REQUEST', 2:'RESPONSE'}
+FLAG = {'ACK':1, 'URG':2, 'ECN':4, 'SEC':8}     #Not YET in use
+FLAG_REV = {1:'ACK', 2:'URG', 4:'ECN', 8:'SEC'} #Not YET in use
 
 class PacketManager():
     def __init__(self):
-    	self.bytearrayTLV = ' '             #variable
-    	self.TLVs = []                      #variable
+        self.bytearrayTLV = ' '             #variable
+        self.TLVs = []                      #variable
         self.logger = logging.getLogger("PacketManager")
         self.logger.info("PacketManager created")
         
     def create_packet(self, version=1, flags=0, senderID=0, txlocalID=0, txremoteID=0,
                       sequence=0, ack=0, otype=0, ocode=0, TLVlist=None, rawdata=None):
         
-    	del self.TLVs[:]
-    	self.bytearrayTLV = ' '
-
+        del self.TLVs[:]
+        self.bytearrayTLV = ' '
+        self.flag_list = flags
+        
         if rawdata:
             self.packetize_raw(rawdata)
         else:
             self.version = version              #4 bit
-            self.flags = flags                  #4 bit
+            self.flags = 0                  #4 bit
             self.nextTLV = NULLTLV              #8 bit
             self.senderID = senderID            #16bit
             self.txlocalID = txlocalID          #16bit
@@ -56,9 +59,9 @@ class PacketManager():
                 self.append_list_to_TLVlist(TLVlist)
     
     def packetize_raw(self, rawdata):
-    	del self.TLVs[:]
-    	self.bytearrayTLV = ' '
-	
+        del self.TLVs[:]
+        self.bytearrayTLV = ' '
+        
         tempraw = rawdata
         
         tmpbyte = ord(tempraw[0])
@@ -116,31 +119,40 @@ class PacketManager():
             i+=clen
             self.append_entry_to_TLVlist(RAWTLVTYPE[ctype],cvalue)
         
-    def create_TLV_entry(self, type, value):
+    def create_TLV_entry(self, ttype, value):
         if len(value)>=10**TLVLENSIZE:
-            self.logger.error("Error adding TLV %s:%s:%s" % (type, str(len(value)), value))
+            self.logger.error("Error adding TLV %s:%s:%s" % (ttype, str(len(value)), value))
             return
         
-        etype = TLVTYPE[type]
+        etype = TLVTYPE[ttype]
         elen = (TLVLENSIZE - len(str(len(value)))) * '0' + str(len(value))
         evalue = value
         return (etype,elen,evalue)
     
-    def append_entry_to_TLVlist(self, type, value): #entry coded as (type,value)
-        tlventry = self.create_TLV_entry(type, value)
+    def append_entry_to_TLVlist(self, ttype, value): #entry coded as (type,value)
+        tlventry = self.create_TLV_entry(ttype, value)
         if tlventry != None:
             self.TLVs.append(tlventry)
         
-    def append_list_to_TLVlist(self, type, infolist): #infolist coded as [value,value...]
+    def append_list_to_TLVlist(self, ttype, infolist): #infolist coded as [value,value...]
         for item in infolist:
-            tlventry = self.create_TLV_entry(type, item)
+            tlventry = self.create_TLV_entry(ttype, item)
             self.TLVs.append(tlventry)
 
     def get_version(self):
         return self.version
     
     def get_flags(self):
-        return self.flags
+        flaglist = []
+        if self.flags & 8 == 8:
+            flaglist.append('SEC')
+        if self.flags & 4 == 4:
+            flaglist.append('ECN')
+        if self.flags & 2 == 2:
+            flaglist.append('URG')
+        if self.flags & 1 == 1:
+            flaglist.append('ACK')
+        return flaglist
     
     def get_senderID(self):
         return self.senderID
@@ -165,16 +177,16 @@ class PacketManager():
     
     def get_TLVlist(self, tlvtype=-1):
         tmplist = []
-	print self.TLVs
+        print self.TLVs
         for item in self.TLVs:
             #tmplist.append((RAWTLVTYPE[item[0]],item[2]))
-	    if tlvtype < 0 or tlvtype == item[0]:
-            	tmplist.append(item[2])
+            if tlvtype < 0 or tlvtype == item[0]:
+                tmplist.append(item[2])
         return tmplist
             
 
     def calculate_checksum(self):
-        tempsum = 0L
+        #tempsum = 0L
         
         subchunk1 = (self.version << 4 | self.flags) << 8 | self.nextTLV
         subchunk2 = int(self.sequence >> 8)
@@ -228,10 +240,36 @@ class PacketManager():
             i+=1
         
         self.bytearrayTLV = tempstring
+
+    def build_FLAGs(self):
+        flagvalue = 0
         
+        if len(self.flag_list) == 0:
+            self.logger.debug("There are no FLAGs to build")
+            del self.flag_list[:]
+            return
+        #FLAG = {'ACK':1, 'URG':2, 'ECN':4, 'SEC':8}
+        else:
+            for item in self.flag_list:
+                if item == 'ACK':
+                    flagvalue += 1
+                elif item == 'URG':
+                    flagvalue += 2
+                elif item == 'ECN':
+                    flagvalue += 4
+                elif item == 'SEC':
+                    flagvalue += 8
+                    
+            print "Flagvalue: ", flagvalue
+            self.flags = flagvalue
+                
     def build_packet(self): 
         #First build TLV so the field nextType is filled
         self.build_TLVs()
+        #Then build the FLAGs
+        self.build_FLAGs()
+        
+        print "In build packet. self.flags=", self.flags
         #Then we can calculate the checksum for the protocol header
         self.checksum = self.calculate_checksum()
         byte1 = self.version << 4 | self.flags

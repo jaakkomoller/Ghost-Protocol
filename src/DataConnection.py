@@ -67,9 +67,9 @@ class DataServer(Thread):
 			#timeout = timeout+1
 
 
-	def add_session(self, remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, hash, size, finished, is_request):
+	def add_session(self, remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, hash, size, is_request):
 
-		data_session = DataSession(remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, hash, size, finished) 
+		data_session = DataSession(remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, hash, size, 0) 
 
 		for session in self.session_list:
 			
@@ -167,7 +167,7 @@ class DataSession():
 			tlvlist = packet.get_TLVlist(tlvtype=TLVTYPE['DATA'])
                         print(tlvlist[0])
 			
-			#TODO: construct the file and manage nacks etc.
+			#TODO: construct the file and manage session. 
 			
 			#an example of file management
         		#self.allocate_file('/path/to/new_file.temp',self.size)
@@ -308,7 +308,7 @@ def main():
 	#data_server.remove_port(4501)
 
 	port=data_server.get_port()
-	data_server.add_session('0.0.0.0', 4502,111,222,1,10,'/u/opi/66/kyostit1/temp.txt',234,205,0,True)
+	data_server.add_session('0.0.0.0', 4502,111,222,1,10,'/u/opi/66/kyostit1/temp.txt',234,205,True)
 
 
 	

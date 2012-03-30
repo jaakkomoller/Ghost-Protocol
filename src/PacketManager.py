@@ -24,7 +24,7 @@ class PacketManager():
         self.bytearrayTLV = ' '             #variable
         self.TLVs = []                      #variable
         self.logger = logging.getLogger("PacketManager")
-        self.logger.info("PacketManager created")
+        self.logger.debug("PacketManager created")
         
     def create_packet(self, version=1, flags=0, senderID=0, txlocalID=0, txremoteID=0,
                       sequence=0, ack=0, otype=0, ocode=0, TLVlist=None, rawdata=None):
@@ -139,6 +139,9 @@ class PacketManager():
             tlventry = self.create_TLV_entry(ttype, item)
             self.TLVs.append(tlventry)
 
+    def purge_tlvs(self, ttype = -1):
+	self.TLVs[:] = [tlv for tlv in self.TLVs if ttype < 0 or TLVTYPE[ttype] == tlv[0]]
+
     def get_version(self):
         return self.version
     
@@ -177,7 +180,6 @@ class PacketManager():
     
     def get_TLVlist(self, tlvtype=-1):
         tmplist = []
-        print self.TLVs
         for item in self.TLVs:
             #tmplist.append((RAWTLVTYPE[item[0]],item[2]))
             if tlvtype < 0 or tlvtype == item[0]:
@@ -260,7 +262,7 @@ class PacketManager():
                 elif item == 'SEC':
                     flagvalue += 8
                     
-            print "Flagvalue: ", flagvalue
+            self.logger.debug("Flagvalue: %d", flagvalue)
             self.flags = flagvalue
                 
     def build_packet(self): 
@@ -269,7 +271,7 @@ class PacketManager():
         #Then build the FLAGs
         self.build_FLAGs()
         
-        print "In build packet. self.flags=", self.flags
+        self.logger.debug("In build packet. self.flags=%s", self.flags)
         #Then we can calculate the checksum for the protocol header
         self.checksum = self.calculate_checksum()
         byte1 = self.version << 4 | self.flags

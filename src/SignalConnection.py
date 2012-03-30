@@ -2,6 +2,7 @@ import logging, socket, signal, sys, time, random
 from threading import Thread
 
 from PacketManager import *
+from Connection import *
 from Configuration import *
 from FileSystem import *
 # TODO remove Configuration, sys and signal imports
@@ -100,147 +101,6 @@ class SignalServer(Thread):
 		self.logger.info("server should stop")
 		self.exit_flag = True
 
-# This class is a parent class for all connections, signal or data.
-# It provides flow control, security, authentication, and/or congestion control if needed.
-class Connection:
-
-	class State:
-		UNCONNECTED = 0
-		CONNECTED = 1
-		HELLO_SENT = 2
-		HELLO_RECVD = 3
-
-	# TODO add timers
-	server = None # Pointer to SignalServer server (for shared info, such as Sender ID)
-	version = 1
-	remote_ip = None
-	remote_port = 0
-	seq_no = 0	# Our seq no
-	ack_no = 0	# Last seq we have received in order
-	recv_ack_no = 0	# What remote side has acked
-	rtt = 0.0		# RTT in seconds
-	local_session_id = 0
-	remote_session_id = 0
-	state = State.UNCONNECTED
-	logger = None
-	unack_queue = []	# Queue of sent, but unacked packets
-	unack_timer = None
-	resends = 0
-
-	# TODO check initializations
-	def __init__(self, server, remote_ip, remote_port, local_session_id, remote_session_id = 0,
-			version = 1, seq_no = random.randint(0, 65534), rtt = 1.0, logger_str = "Connection to"):
-		self.server = server     # Pointer to server (for shared info, such as Sender ID)
-		self.version = version
-		self.remote_ip = remote_ip
-		self.remote_port = remote_port
-		self.seq_no = seq_no
-		self.sent_ack_no = 0
-		self.recv_ack_no = 0
-		self.local_session_id = local_session_id
-		self.remote_session_id = remote_session_id
-		self.state = Connection.State.UNCONNECTED
-		self.rtt = rtt
-		self.unack_timer = Connection.NoAckTimer(self)
-		
-		self.logger = logging.getLogger(logger_str + str(self.remote_ip) + ':' + str(self.remote_port))
-		self.logger.info("Initializing connection to %s:%i at %s" % (self.remote_ip, self.remote_port, str(time.time())))
-
-	def receive_packet(self, packet):
-		self.resends = 0
-		if packet.sequence != 65535 and packet.sequence == self.ack_no+1: # seq no 65535 reserved for unreliable transfer.
-			# TODO We should not require packets to arrive in order.
-			self.ack_no = packet.sequence
-		
-		self.logger.info("packets in unack queue before packet: %d" % len(self.unack_queue))
-		self.unack_queue[:] = [sent_packet for sent_packet in self.unack_queue if self.ack_no >= sent_packet.sequence]	
-		self.logger.info("packets in unack queue after packet: %d" % len(self.unack_queue))
-		oldest = None # TODO This wont work for wraparounds
-		for packet_i in self.unack_queue:
-			if packet_i.self.ack_no+1 == self.unack_timer.waiting_for_packet.sequence:
-				return
-			if not oldest or packet_i.sequence < oldest.sequence:
-				oldest = packet_i
-		if oldest:
-			self.unack_timer.reset_timer(3*self.rtt, oldest) # TODO Set timer from the current time
-		else:
-			self.unack_timer.stop()
-			
-		
-	
-	def send_packet_reliable(self, packet):
-		packet.sequence = self.seq_no
-		packet.ack = self.ack_no
-		packet.send_time = time.time()
-		self.server.sock.sendto(packet.build_packet(), (self.remote_ip, self.remote_port) )
-		self.seq_no = (self.seq_no + 1) % 65535
-		if not self.unack_queue:
-			self.unack_timer.reset_timer(3*self.rtt, packet)
-			self.logger.info('unack queue is empty')
-		else:
-			self.logger.info('unack queue is not empty')
-		self.unack_queue.append(packet)
-		self.logger.info('Packet sent reliably, packets in queue: %d resend timer running: %s, is killed %s' % (len(self.unack_queue), str(self.unack_timer.isAlive()), str(self.unack_timer.kill_flag)))
-
-	def send_packet_unreliable(self, packet):
-		packet.sequence = 65535
-		packet.ack = self.ack_no
-		packet.send_time = time.time()
-		self.server.sock.sendto(packet.build_packet(), (self.remote_ip, self.remote_port) )
-		self.logger.info('Packet sent unreliably')
-	
-	def no_ack_timeout(self, packet):
-		if not self.unack_queue:
-			self.logger.info('No packets to resend')
-			return
-		
-		self.logger.info('Resending')
-		self.server.sock.sendto(packet.build_packet(), (self.remote_ip, self.remote_port) )
-		self.resends += 1
-		self.logger.info('Resend done, resends %d' % self.resends)
-
-	def stop(self):
-		if self.unack_timer and self.unack_timer.isAlive():
-			self.unack_timer.stop()
-			
-
-	class NoAckTimer(Thread):
-		connection = None
-		zzz = 0.0
-		when_to_wake = 0.0
-		waiting_for_packet = None	# Packet we are waiting to be acked.
-		was_reset_flag = False
-		kill_flag = False
-
-		def __init__(self, connection):
-			Thread.__init__(self)
-			self.connection = connection
-
-		def run(self):
-			time.sleep(self.when_to_wake - time.time())
-
-			if self.kill_flag == True:
-				return
-			if self.was_reset_flag == False:
-				self.connection.no_ack_timeout(self.waiting_for_packet)
-			
-			self.was_reset_flag = False
-			self.when_to_wake = time.time() + self.zzz
-			self.run()
-	
-		def reset_timer(self, zzz, packet):
-			self.waiting_for_packet = packet
-			self.zzz = zzz
-			self.when_to_wake = time.time() + zzz
-			self.kill_flag = False
-			if self.isAlive():
-				self.was_reset_flag = True
-			else:
-				self.was_reset_flag = False
-				self.start()
-	
-		def stop(self):
-			self.kill_flag = True
 
 class SignalConnection(Connection):
 	
@@ -435,33 +295,6 @@ class SignalConnection(Connection):
 		self.send_packet_unreliable(packet_to_send)
 		self.logger.info('pull response sent, tlvs: %s' % tlv_string)
 
-class LossySocket(object):
-	class State:
-		loss = 1
-		not_lost = 2
-
-	q = 0.0
-	p = 0.0
-	socket = None
-	state = State.not_lost
-
-	def __init__(self, af_family, protocol, q = 1.0, p = 0.0):
-		self.socket = socket.socket(af_family, protocol)
-		self.q = q
-		self.p = p
-		state = LossySocket.State.not_lost
-
-	def __getattr__(self, name):
-		return getattr(self.socket, name)
-	
-	def sendto(self, data, ip_port_tuple):
-
-		if (self.state == LossySocket.State.not_lost and self.p < random.random()) or \
-                                (self.state == LossySocket.State.loss and self.q > random.random()):
-                        self.socket.sendto(data, ip_port_tuple)
-                        self.state = LossySocket.State.not_lost
-                else:
-                        self.state = LossySocket.State.loss
 
 # For testing purposes
 # TODO Remove this

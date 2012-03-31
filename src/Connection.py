@@ -24,37 +24,17 @@ class Connection:
 	max_resend_time = 1.0	# Max resend time in secs
 	init_rtt = 1.0
 
-	# TODO add timers
-	sock = None # Pointer to server socket
-	version = 1
-	remote_ip = None
-	remote_port = 0
-	seq_no = 0	# Our seq no
-	ack_no = 0	# Last seq we have received in order
-	recv_ack_no = 0	# What remote side has acked
-	max_local_send_window = 10	# Max local window send in packets
-	local_send_window = max_local_send_window	# Local window send in packets
-	remote_send_window = 10	# Remote send window in packets
-	rtt = 0.0		# RTT in seconds
-	local_session_id = 0
-	remote_session_id = 0
-	state = State.UNCONNECTED
-	logger = None
-	unack_queue = []	# Queue of sent, but unacked packets
-	unack_timer = None
-	resends = 0
-
 	# TODO check initializations
 	# TODO change server to jsut sock for Connection object
 	def __init__(self, sock, remote_ip, remote_port, local_session_id, remote_session_id = 0,
-			version = 1, seq_no = random.randint(0, 65534), rtt = init_rtt,
-			logger_str = "Connection to", max_local_send_window = 10, remote_send_window = 10):
+			version = 1, send_ack_no = random.randint(0, 65534), seq_no = random.randint(0, 65534),
+			rtt = init_rtt, logger_str = "Connection to", max_local_send_window = 10, remote_send_window = 10):
 		self.sock = sock     # Pointer to server socket
 		self.version = version
 		self.remote_ip = remote_ip
 		self.remote_port = remote_port
 		self.seq_no = seq_no
-		self.sent_ack_no = 0
+		self.send_ack_no = send_ack_no
 		self.recv_ack_no = 0
 		self.max_local_send_window = max_local_send_window
 		self.local_send_window = max_local_send_window
@@ -66,22 +46,28 @@ class Connection:
 		self.unack_timer = Connection.NoAckTimer(self)
 		self.remote_send_time = 0.0
 		self.remote_send_time_receive_time = 0.0
+		self.unack_queue = RingBuffer(10)	# Queue of sent, but unacked packets
+		self.sync = thread.allocate_lock()
+		self.resends = 0
 		
 		self.logger = logging.getLogger(logger_str + str(self.remote_ip) + ':' + str(self.remote_port))
 		self.logger.info("Initializing connection to %s:%i at %s" % (self.remote_ip, self.remote_port, str(time.time())))
 
 	def receive_packet(self, packet):
+		self.sync.acquire()
 		self.resends = 0
 		if packet.sequence != Connection.max_seq and \
-				packet.sequence == (self.ack_no+1 % Connection.max_seq): # Max seq reserved for unreliable transfer.
+				packet.sequence == (self.send_ack_no+1 % Connection.max_seq): # Max seq reserved for unreliable transfer.
 			# TODO We should not require packets to arrive in order.
-			self.ack_no = packet.sequence
-		
-		# Signal send window
-		packet.append_entry_to_TLVlist('CONTROL', 'send_win?%d' % self.local_send_window)
+			self.send_ack_no = packet.sequence
+			ret = True
+		else:
+			ret = False
 
+		self.recv_ack_no = packet.ack
+		
 		# Read control data
-		for item in packet.get_TLVlist(tlvtype = TLVTYPE['CONTROL']):
+		for item in packet.get_TLVlist(tlvtype = 'CONTROL'):
 			if len(item.split('?')) == 2 and item.split('?')[0] == 'send_win':
 				# Send window
 				self.remote_send_window = int(item.split('?')[1])
@@ -97,38 +83,34 @@ class Connection:
 				self.logger.debug("rtt set to: %f" % self.rtt)
 
 
-		self.logger.debug("packets in unack queue before packet: %d" % len(self.unack_queue))
+		self.logger.debug("ack no: %d, packets in unack queue before packet: %d, seq nos: %s" % \
+			(self.recv_ack_no, self.unack_queue.getSize(), [unack_packet.sequence for unack_packet in \
+			self.unack_queue.get() if unack_packet != None]))
 		
 		# Remove acked packets from unack queue.
-		self.unack_queue[:] = [sent_packet for sent_packet in self.unack_queue if \
-			(self.ack_no >= sent_packet.sequence) or \
-			(sent_packet.sequence >= Connection.max_seq -1000\
-			and 1000 > sent_packet.sequence) ]	
+		#self.unack_queue.get()[:] = [sent_packet for sent_packet in self.unack_queue.get() if not\
+		#	((self.recv_ack_no >= sent_packet.sequence) or \
+		#	(sent_packet.sequence >= Connection.max_seq -1000\
+		#	and 1000 > self.ack_no)) ]	
 		
-		self.local_send_window = self.max_local_send_window - len(self.unack_queue)
-		self.logger.debug("packets in unack queue after packet: %d" % len(self.unack_queue))
-		oldest = None
-		for packet_i in self.unack_queue:
-			if (packet_i.ack+1) % Connection.max_seq == self.unack_timer.getPacket().sequence:
-				# Packet we are waiting for was not acked.
-				return
-			if oldest:
-				oldest_seq_unwrapped = oldest.sequence
-			p_seq_unwrapped = packet_i.sequence
-			if oldest and oldest.sequence + Connection.max_seq - packet_i.sequence < 2000:
-				self.logger.debug("wrap 1")
-				# Iterated packet has wrapped 
-				oldest_seq_unwrapped = oldest.sequence + Connection.max_seq
-			if oldest and packet_i.sequence + Connection.max_seq - oldest.sequence < 2000:
-				self.logger.debug("wrap 2")
-				# Oldest has wrapped
-				p_seq_unwrapped = packet_i.sequence + Connection.max_seq
-			if not oldest or p_seq_unwrapped < oldest_seq_unwrapped:
-				# Find the oldest packet in unack_queue
-				oldest = packet_i
+		unack_packets = self.unack_queue.get()
+		for i in range(len(unack_packets)):
+		#for sent_packet in self.unack_queue.get():
+			sent_packet = unack_packets[i]
+			if sent_packet != None and ((self.recv_ack_no >= sent_packet.sequence) or \
+					(sent_packet.sequence >= Connection.max_seq -1000\
+					and 1000 > self.recv_ack_no)):
+				self.logger.debug("removing seq %d" % sent_packet.sequence)
+				unack_packets[i] = None
+
+		self.local_send_window = self.max_local_send_window - self.unack_queue.getSize()
+		self.logger.debug("packets in unack queue after packet: %d, seq nos: %s" % \
+			(self.unack_queue.getSize(), [unack_packet.sequence for unack_packet in \
+			self.unack_queue.get() if unack_packet != None]))
+		oldest = self.unack_queue.get_oldest()
 
 		# sanity
-		if not oldest and len(self.unack_queue) != 0:
+		if not oldest and self.unack_queue.getSize() != 0:
 			self.logger.error("Error in packet reception: oldest packet not found, but packets still in unack queue")
 			sys.exit()
 
@@ -138,40 +120,48 @@ class Connection:
 		else:
 			self.unack_timer.cancel()
 			
+		self.sync.release()
+		return ret
 		
 	
 	def send_packet_reliable(self, packet):
+		self.sync.acquire()
 		if self.local_send_window == 0:
+			self.sync.release()
 			return False
 		
 		packet.sequence = self.seq_no
 
 		self.__send_out(packet)
 
-		self.seq_no = (self.seq_no + 1) % (Connection.max_seq)
-		if not self.unack_queue:
+		self.seq_no = (self.seq_no + 1) % Connection.max_seq
+		if self.unack_queue.getSize() == 0:
 			self.unack_timer.reset_timer(3*self.rtt, packet)
 			self.logger.debug('unack queue is empty')
 		else:
 			self.logger.debug('unack queue is not empty')
-			if self.unack_timer.getState() == 'sleeping cancelled':
-				self.logger.warning('Unack timer not running altough packets in unack queue')
+			if self.unack_timer.isCancelled():
+				self.logger.error('Unack timer not running altough packets in unack queue, state %s' % self.unack_timer.getState())
+				exit(0)
 		self.unack_queue.append(packet)
-		self.local_send_window = self.max_local_send_window - len(self.unack_queue)
+		self.local_send_window = self.max_local_send_window - self.unack_queue.getSize()
 		self.logger.debug('Packet sent reliably, packets in queue: %d resend timer state %s, tlvs in packet %d'\
-			% (len(self.unack_queue), str(self.unack_timer.getState()), len(packet.TLVs)))
+			% (self.unack_queue.getSize(), str(self.unack_timer.getState()), len(packet.TLVs)))
+		self.sync.release()
 		return True
 
 	def send_packet_unreliable(self, packet):
+		self.sync.acquire()
 		packet.sequence = Connection.max_seq
 
 		self.__send_out(packet)
 
 		self.logger.debug('Packet sent unreliably')
+		self.sync.release()
 	
 	def __send_out(self, packet, resend = False):
 
-		packet.ack = self.ack_no
+		packet.ack = self.send_ack_no
 		
 		packet.purge_tlvs(ttype = 'CONTROL')
 		
@@ -189,7 +179,7 @@ class Connection:
 
 		packet.send_time = time.time()
 
-		self.sock.sendto(packet.build_packet(), (self.remote_ip, self.remote_port) )
+		self.sock.sendto(packet.build_packet(), (self.remote_ip, self.remote_port), resend)
 	
 	def no_ack_timeout(self, packet):
 		if not self.unack_queue:
@@ -197,8 +187,9 @@ class Connection:
 			return
 		
 		self.logger.debug('Resending')
-		self.__send_out(packet)
+		self.__send_out(packet, resend = True)
 		self.resends += 1
+		packet.resends += 1
 		self.logger.debug('Resend done, resends %d, tlvs in packet %d' % (self.resends, len(packet.TLVs)))
 
 	def __setRtt(self, rtt):
@@ -216,9 +207,10 @@ class Connection:
 		class State:
 			not_started = 0
 			waiting = 1
-			sleeping = 2
-			sleeping_cancelled = 3
-			killed = 4
+			waiting_cancelled = 2
+			sleeping = 3
+			sleeping_cancelled = 4
+			killed = 5
 
 		def __init__(self, connection):
 			Thread.__init__(self)
@@ -227,15 +219,21 @@ class Connection:
 			self.__zzz = 0.0
 			self.__waiting_for_packet = None	# Packet we are waiting to be acked.
 			self.__run_permission = thread.allocate_lock()
+			self.__sync = thread.allocate_lock()
 			self.__state = Connection.NoAckTimer.State.not_started
 
 		def run(self):
+			self.__sync.acquire()
 			while True:
-				self.__state = Connection.NoAckTimer.State.waiting
+				if self.__state != Connection.NoAckTimer.State.waiting_cancelled:
+					self.__state = Connection.NoAckTimer.State.waiting
+				self.__sync.release()
 				self.__run_permission.acquire()
+				self.__sync.acquire()
 
 				if self.__state == Connection.NoAckTimer.State.killed:
 					# Someone killed us
+					self.__sync.release()
 					return
 				
 				self.__state = Connection.NoAckTimer.State.sleeping
@@ -243,10 +241,13 @@ class Connection:
 				time_to_sleep = self.__when_to_wake - time.time()
 				if time_to_sleep > 0:
 					# Sleep
+					self.__sync.release()
 					time.sleep(time_to_sleep)
+					self.__sync.acquire()
 				
 				if self.__state == Connection.NoAckTimer.State.killed:
 					# Someone killed us
+					self.__sync.release()
 					return
 
 				if self.__state == Connection.NoAckTimer.State.sleeping_cancelled:
@@ -269,6 +270,7 @@ class Connection:
 			
 	
 		def reset_timer(self, zzz, packet):
+			self.__sync.acquire()
 			self.__waiting_for_packet = packet
 			self.setZzz(zzz)
 			self.__when_to_wake = time.time() + self.__zzz
@@ -276,7 +278,8 @@ class Connection:
 				# Must have not run yet
 				# Lock is initially released
 				self.start()
-			elif self.__state == Connection.NoAckTimer.State.waiting:
+			elif self.__state == Connection.NoAckTimer.State.waiting or \
+					self.__state == Connection.NoAckTimer.State.waiting_cancelled:
 				# Must be waiting for permission to run
 				try:
 					# Might throw an error if lock is already free..
@@ -295,32 +298,49 @@ class Connection:
 			else:
 				print 'invalid state'
 				sys.exit(0)
+			self.__sync.release()
 
 	
 		def cancel(self):
+			self.__sync.acquire()
 			if self.__state == Connection.NoAckTimer.State.sleeping:
 				self.__state = Connection.NoAckTimer.State.sleeping_cancelled
+			elif self.__state == Connection.NoAckTimer.State.waiting:
+				self.__state = Connection.NoAckTimer.State.waiting_cancelled
+			self.__sync.release()
 
 		def kill(self):
+			self.__sync.acquire()
 			self.__state = Connection.NoAckTimer.State.killed
 			try:
 				# Might throw an error if lock is already free..
 				self.__run_permission.release()
 			except:
 				pass
+			self.__sync.release()
 
 		def getState(self):
+			self.__sync.acquire()
 			if self.__state == Connection.NoAckTimer.State.not_started:
+				self.__sync.release()
 				return 'not started'
 			elif self.__state == Connection.NoAckTimer.State.waiting:
+				self.__sync.release()
 				return 'waiting'
+			elif self.__state == Connection.NoAckTimer.State.waiting_cancelled:
+				self.__sync.release()
+				return 'waiting cancelled'
 			elif self.__state == Connection.NoAckTimer.State.sleeping:
+				self.__sync.release()
 				return 'sleeping'
 			elif self.__state == Connection.NoAckTimer.State.sleeping_cancelled:
+				self.__sync.release()
 				return 'sleeping cancelled'
 			elif self.__state == Connection.NoAckTimer.State.killed:
+				self.__sync.release()
 				return 'killed'
 			else:
+				self.__sync.release()
 				return 'invalid state'
 
 		def getPacket(self):
@@ -331,33 +351,51 @@ class Connection:
 				self.__zzz = Connection.max_resend_time
 			else:
 				self.__zzz = zzz
-				
 
+		def isCancelled(self):
+			self.__sync.acquire()
+			ret = self.__state == Connection.NoAckTimer.State.waiting_cancelled or \
+				(self.__state == Connection.NoAckTimer.State.sleeping_cancelled and \
+				self.__run_permission.locked()) or \
+				self.__state == Connection.NoAckTimer.State.killed
+			self.__sync.release()
+			return ret
+
+class RingBuffer:
+	def __init__(self, size):
+		self.data = [None for i in xrange(size)]
+
+	def append(self, x):
+		self.data.pop(0)
+		self.data.append(x)
+
+	def get(self):
+		return self.data
+
+	def get_oldest(self):
+		for element in self.data:
+			if element != None:
+				return element
+		return None
+
+	def get_latest(self):
+		return self.data[len(self.data)-1]
+	
+	def getSize(self):
+		length = 0
+		for element in self.data:
+			if element != None:
+				length += 1
+		return length
+	
+	def set(self, data):
+		self.data = data
 
 class LossySocket(object):
 	class State:
 		loss = 1
 		not_lost = 2
 
-	class RingBuffer:
-		def __init__(self, size):
-			self.data = [None for i in xrange(size)]
-
-		def append(self, x):
-			self.data.pop(0)
-			self.data.append(x)
-
-		def get(self):
-			return self.data
-
-		def get_oldest(self):
-			for element in self.data:
-				if element != None:
-					return element
-			return None
-
-		def get_latest(self):
-			return self.data[len(self.data)-1]
 
 	q = 0.0
 	p = 0.0
@@ -377,12 +415,13 @@ class LossySocket(object):
 	def __getattr__(self, name):
 		return getattr(self.socket, name)
 	
-	def calculate_and_print_bw(self, packet_len):
+	def calculate_and_print_bw(self, packet_len, resend):
 		# Store bw measurement data as (LossySocket, send time, data len) tuple
-		LossySocket.bw_measurement_buffer.append((self, time.time(), packet_len))
+		LossySocket.bw_measurement_buffer.append((self, time.time(), packet_len, resend))
 		bw = 0.0
 		packets_sent = 0
 		bytes_sent = 0
+		resends_in_sec = 0
 		for element in LossySocket.bw_measurement_buffer.get():
 			if element == None:
 				continue
@@ -390,6 +429,8 @@ class LossySocket(object):
 			if time.time() - element[1] < 1.0:
 				bytes_sent += element[2]
 				packets_sent += 1
+				if element[3] == True:
+					resends_in_sec += 1
 
 		oldest = LossySocket.bw_measurement_buffer.get_oldest()
 		latest = LossySocket.bw_measurement_buffer.get_latest()
@@ -400,15 +441,21 @@ class LossySocket(object):
 			else:
 				send_time = 1.0
 
-			self.logger.info("Bandwidth: %f Mbps, %d pps" % (bytes_sent *8 / send_time /1000000, \
-				float(packets_sent)/send_time))
+			self.logger.info("BW: %.2f Mbps, %d pps, ave pkt size: %.2f, resends %d" % \
+				(bytes_sent *8 / send_time /1000000, \
+				float(packets_sent)/send_time,
+				float(bytes_sent) / float(packets_sent),
+				resends_in_sec))
 
-	def sendto(self, data, ip_port_tuple):
+	def sendto(self, data, ip_port_tuple, resend = False):
 
 		if (self.state == LossySocket.State.not_lost and self.p < random.random()) or \
                                 (self.state == LossySocket.State.loss and self.q > random.random()):
                         self.socket.sendto(data, ip_port_tuple)
                         self.state = LossySocket.State.not_lost
-			self.calculate_and_print_bw(len(data))
+			self.calculate_and_print_bw(len(data), resend)
                 else:
                         self.state = LossySocket.State.loss
+			
+
+

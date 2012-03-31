@@ -139,8 +139,8 @@ class PacketManager():
             tlventry = self.create_TLV_entry(ttype, item)
             self.TLVs.append(tlventry)
 
-    def purge_tlvs(self, ttype = -1):
-	self.TLVs[:] = [tlv for tlv in self.TLVs if ttype < 0 or TLVTYPE[ttype] == tlv[0]]
+    def purge_tlvs(self, ttype = ""):
+	self.TLVs[:] = [tlv for tlv in self.TLVs if not (ttype == "" or TLVTYPE[ttype] == tlv[0])]
 
     def get_version(self):
         return self.version
@@ -178,11 +178,11 @@ class PacketManager():
     def get_ocode(self):
         return REV_CODE[self.ocode]
     
-    def get_TLVlist(self, tlvtype=-1):
+    def get_TLVlist(self, tlvtype=""):
         tmplist = []
         for item in self.TLVs:
             #tmplist.append((RAWTLVTYPE[item[0]],item[2]))
-            if tlvtype < 0 or tlvtype == item[0]:
+            if tlvtype == "" or TLVTYPE[tlvtype] == item[0]:
                 tmplist.append(item[2])
         return tmplist
             
@@ -327,6 +327,7 @@ class PacketManager():
 
 class OutPacket(PacketManager):
     send_time = 0.0
+    resends = 0
     def __init__(self):
         PacketManager.__init__(self)
 

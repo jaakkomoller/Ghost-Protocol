@@ -7,6 +7,7 @@ To do:
 
 import logging, struct
 
+MAXPKTSIZE = 60
 TLVTYPESIZE = 1
 TLVLENSIZE = 4
 NULLTLV = 0xFF
@@ -37,7 +38,7 @@ class PacketManager():
             self.packetize_raw(rawdata)
         else:
             self.version = version              #4 bit
-            self.flags = 0                  #4 bit
+            self.flags = 0                      #4 bit
             self.nextTLV = NULLTLV              #8 bit
             self.senderID = senderID            #16bit
             self.txlocalID = txlocalID          #16bit
@@ -131,16 +132,27 @@ class PacketManager():
     
     def append_entry_to_TLVlist(self, ttype, value): #entry coded as (type,value)
         tlventry = self.create_TLV_entry(ttype, value)
-        if tlventry != None:
+        if tlventry != None and self.get_packet_length() < MAXPKTSIZE:
             self.TLVs.append(tlventry)
+            return True
+        
+        print "Failed to add TVL"
+        return False
         
     def append_list_to_TLVlist(self, ttype, infolist): #infolist coded as [value,value...]
+        remaining_items = []
         for item in infolist:
-            tlventry = self.create_TLV_entry(ttype, item)
-            self.TLVs.append(tlventry)
+            if self.get_packet_length() < MAXPKTSIZE:
+                tlventry = self.create_TLV_entry(ttype, item)
+                self.TLVs.append(tlventry)
+            else:
+                remaining_items.append(item)
+                
+        print "The following TLV(s) could not be added:", remaining_items
+        return remaining_items
 
     def purge_tlvs(self, ttype = ""):
-	self.TLVs[:] = [tlv for tlv in self.TLVs if not (ttype == "" or TLVTYPE[ttype] == tlv[0])]
+        self.TLVs[:] = [tlv for tlv in self.TLVs if not (ttype == "" or TLVTYPE[ttype] == tlv[0])]
 
     def get_version(self):
         return self.version
@@ -283,6 +295,12 @@ class PacketManager():
                     self.bytearrayTLV
         return packet
     
+    def get_packet_length(self):
+        packet_size = 20
+        for item in self.TLVs:
+            packet_size += (len(item[2])+5)
+        return packet_size
+        
     def print_packet(self):
         print "version: '%s':'%x'" % (self.version,self.version)
         print "flags: '%s':'%x'" % (self.flags,self.flags)

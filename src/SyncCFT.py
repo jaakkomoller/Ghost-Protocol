@@ -64,9 +64,14 @@ class SyncCFT:
         
         print "Creating the packet..."
         self.packetmanager.create_packet(2, ['ACK','SEC'], 0xabcd,0xfeea, 0xfee0, 3150765550, 286331153, "HELLO", "REQUEST", None, None)
+        
+        
+        self.packetmanager.append_list_to_TLVlist('DATA', ['oneeeeee','twoooooooo','threeeeeeee', 'fourrrrrrr'])
+        
         self.packetmanager.append_entry_to_TLVlist('DATA', 'data_test')
         self.packetmanager.append_entry_to_TLVlist('CONTROL', 'control_test')
         self.packetmanager.append_entry_to_TLVlist('SECURITY', 'security_test')
+        
         
         packet = self.packetmanager.build_packet()
         self.packetmanager.hex_packet()

@@ -2,6 +2,7 @@ import logging, socket, random, select, sys, time, os
 from threading import Thread
 
 from PacketManager import *
+from Connection import *
 
 class DataServer(Thread):
 
@@ -19,7 +20,7 @@ class DataServer(Thread):
 		self.port=port	
 
 		if not ip: ip = '0.0.0.0'
-		if not port: port = random.randint(4500, 4550)
+		if not port: port = random.randint(4500, 4600)
 
 		self.logger = logging.getLogger("Data server started: ip %s, port %s" % (ip,port))
 
@@ -69,7 +70,7 @@ class DataServer(Thread):
 
 	def add_session(self, remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, hash, size, is_request):
 
-		data_session = DataSession(remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, hash, size, 0) 
+		data_session = DataSession(remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, hash, size, False) 
 
 		for session in self.session_list:
 			
@@ -87,9 +88,28 @@ class DataServer(Thread):
 
 	def add_port(self, new_port=""):
                 self.new_port=new_port
+                
+                if not new_port: new_port = random.randint(4500, 4600)
 
-		# TODO: check if port is already in use                
-                if not new_port: new_port = random.randint(4500, 4550)
+		if len(self.port_list)==100:
+			return
+		
+		run = True
+		while (run):
+			
+    			temp = False
+			for x in self.port_list:
+				if x[0] == new_port:
+					new_port = random.randint(4500, 4600)
+					#print("Port already in use")
+					temp = True
+
+			if temp == True:
+				run = True
+			else:
+				run = False # port was added successfully
+				
+
 
                 self.logger = logging.getLogger("New port added: port %s" % (new_port))
 
@@ -128,12 +148,13 @@ class DataSession():
 
 	socket = None
 
-	#TODO: check these
-	seq_no = 0
-	ack_no = 0
-	chunk_size = 50.0 # just some size to test it
+	chunk_size = 50.0 # 1024.0 # just some size to test it
+	temp_file_path = None
+	allocated = False	
+	chunks_to_receive = []
 
-	def __init__(self, remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, hash, size, finished): #timeout?
+	def __init__(self, remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, hash, size, finished=False): #timeout?
+
 		self.remote_ip = remote_ip
 		self.remote_port = remote_port
 		self.local_session_id = local_session_id
@@ -143,7 +164,7 @@ class DataSession():
 		self.file_path = file_path
 		self.hash = hash
 		self.size = size # in bytes 
-		self.finished = finished
+		self.finished = finished 
 		#TODO: add a temp file location
 
 		#TODO: use a server socket
@@ -164,18 +185,21 @@ class DataSession():
 			packet.print_packet()
 			print("response received")			
 	
-			tlvlist = packet.get_TLVlist(tlvtype=TLVTYPE['DATA'])
+			tlvlist = packet.get_TLVlist('DATA')
                         print(tlvlist[0])
 			
-			#TODO: construct the file and manage session. 
+			#TODO: check hash
+
+			if self.allocated == False:
+
+				#TODO: check path
+				self.temp_file_path = '/u/opi/66/kyostit1/file.temp'
+				self.allocate_file(self.temp_file_path)
+				self.allocated = True		
+
+			self.construct_file(self.temp_file_path,packet.get_sequence(),tlvlist[0])
+
 			
-			#an example of file management
-        		#self.allocate_file('/path/to/new_file.temp',self.size)
-		
-        		# get data (chunks) from tlvs (tlvlist[0]) and find out its id somehow... loop this until all chunks are added
-        	        # construct_file('/path/to/new_file.temp',id,chunk)
-
-
 
 
 
@@ -185,15 +209,15 @@ class DataSession():
 			packet.print_packet()
 			print("request received")
 
-			tlvlist = packet.get_TLVlist(tlvtype=TLVTYPE['DATA'])
+			tlvlist = packet.get_TLVlist('DATA')
 						
-			if tlvlist[0]== self.filename:
+			if tlvlist[0]== self.file_path:
 				print("ok")
 			else:	
 				return
 
 
-                        tlvlist = packet.get_TLVlist(tlvtype=TLVTYPE['CONTROL'])
+                        tlvlist = packet.get_TLVlist('CONTROL')
                         for tlv in tlvlist:
                                 temp = tlv.split('?')[0]
 				
@@ -223,22 +247,20 @@ class DataSession():
         def data_req(self,from_chunk,to_chunk):
 
                 packet_to_send = OutPacket()
-                packet_to_send.create_packet(version=self.version, flags=0, senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id,sequence=self.seq_no, ack=self.ack_no, otype='DATA', ocode='REQUEST')
+                packet_to_send.create_packet(version=self.version, flags=[0],senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id,sequence=0, otype='DATA', ocode='REQUEST')
                 packet_to_send.append_entry_to_TLVlist('DATA', self.file_path)
                 packet_to_send.append_entry_to_TLVlist('CONTROL', 'from?%d' % from_chunk)
                 packet_to_send.append_entry_to_TLVlist('CONTROL', 'to?%d' % to_chunk)
                
 		self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
-
+				
 
         def data_response(self,from_chunk, to_chunk):
-
-		#TODO: check seq_no etc.
 
 		for x in range(from_chunk, to_chunk+1):
 
                 	packet_to_send = OutPacket()
-                	packet_to_send.create_packet(version=self.version, flags=0, senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id,sequence=self.seq_no, ack=self.ack_no, otype='DATA', ocode='RESPONSE')
+                	packet_to_send.create_packet(version=self.version, flags=[0], senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id,sequence=x, otype='DATA', ocode='RESPONSE')
                 	
 			chunk=self.get_chunk(x)
 			packet_to_send.append_entry_to_TLVlist('DATA', chunk)
@@ -304,10 +326,11 @@ def main():
 
 	data_server = DataServer('0.0.0.0',4500)
 	data_server.start()
-	#data_server.add_port(4501)
-	#data_server.remove_port(4501)
+	data_server.add_port()
+	#data_server.remove_port(4500)
 
 	port=data_server.get_port()
+	
 	data_server.add_session('0.0.0.0', 4502,111,222,1,10,'/u/opi/66/kyostit1/temp.txt',234,205,True)
 
 

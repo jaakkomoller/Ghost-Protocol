@@ -107,17 +107,18 @@ class SignalConnection(Connection):
 	# TODO check initializations
 	def __init__(self, server, remote_ip, remote_port, local_session_id, remote_session_id = 0,
 			version = 1, seq_no = random.randint(0, 65535)):
-		Connection.__init__(self, server = server, remote_ip = remote_ip, remote_port = remote_port,
+		Connection.__init__(self, sock = server.sock, remote_ip = remote_ip, remote_port = remote_port,
 			local_session_id = local_session_id, remote_session_id = remote_session_id,
 			version = version, seq_no = seq_no, logger_str = "Signal Connection to ")
+		self.__server = server
 		self.logger.info("Initializing signal connection to %s:%i at %s" % (self.remote_ip, self.remote_port, str(time.time())))
 
 	def connect(self):
-		#def create_packet(self, version=1, flags=0, senderID=0, txlocalID=0, txremoteID=0,
+		#def create_packet(self, version=1, flags=[], senderID=0, txlocalID=0, txremoteID=0,
 #     sequence=0, ack=0, otype=0, ocode=0, TLVlist=None, rawdata=None):
 		# Packet manager should be able to build hello packets (i.e. set remote session id)
 		packet_to_send = OutPacket()
-		packet_to_send.create_packet(version=self.version, flags=0, senderID=self.server.sender_id,
+		packet_to_send.create_packet(version=self.version, flags=[], senderID=self.__server.sender_id,
 			txlocalID=self.local_session_id, txremoteID=0, sequence=self.seq_no, otype='HELLO',
 			ocode='REQUEST')  
 		self.send_packet_reliable(packet_to_send)
@@ -127,9 +128,9 @@ class SignalConnection(Connection):
 	def hello_recv(self, packet):
 		self.receive_packet(packet)
 		packet_to_send = OutPacket()
-		packet_to_send.create_packet(version=self.version, flags=0, senderID=self.server.sender_id,
+		packet_to_send.create_packet(version=self.version, flags=[], senderID=self.__server.sender_id,
 			txlocalID=self.local_session_id, txremoteID=self.remote_session_id, sequence=self.seq_no,
-			ack=self.ack_no, otype='HELLO', ocode='RESPONSE')  
+			ack=self.send_ack_no, otype='HELLO', ocode='RESPONSE')  
 		self.send_packet_unreliable(packet_to_send)
 		self.state = Connection.State.HELLO_RECVD
 		# TODO set timers
@@ -140,9 +141,9 @@ class SignalConnection(Connection):
 				self.state == Connection.State.HELLO_SENT:
 			self.remote_session_id = packet.txlocalID
 			packet_to_send = OutPacket()
-			packet_to_send.create_packet(version=self.version, flags=0, senderID=self.server.sender_id,
+			packet_to_send.create_packet(version=self.version, flags=[], senderID=self.__server.sender_id,
 				txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
-				sequence=self.seq_no, ack=self.ack_no, otype='HELLO', ocode='RESPONSE')  
+				sequence=self.seq_no, ack=self.send_ack_no, otype='HELLO', ocode='RESPONSE')  
 			# TODO set remote sender id and ack no
 			self.send_packet_reliable(packet_to_send)
 			self.state = Connection.State.CONNECTED
@@ -170,7 +171,7 @@ class SignalConnection(Connection):
 			for entry in packet.TLVs:
 				if entry[0] == TLVTYPE['DATA']:
 					self.logger.info('hash: %s' % entry[2])
-					if self.server.fsystem.get_hash_manifest() != entry[2]:
+					if self.__server.fsystem.get_hash_manifest() != entry[2]:
 						self.logger.info('hash files differ')
 						self.send_list_request()
 		elif packet.otype == OPERATION['LIST'] and packet.ocode == CODE['REQUEST'] and \
@@ -179,7 +180,7 @@ class SignalConnection(Connection):
 		elif packet.otype == OPERATION['LIST'] and packet.ocode == CODE['RESPONSE'] and \
 				self.state == Connection.State.CONNECTED:
 			tlvlist = packet.get_TLVlist(tlvtype=TLVTYPE['DATA'])
-			manifest = self.server.fsystem.get_diff_manifest_remote(packet.get_TLVlist(tlvtype=TLVTYPE['DATA']))
+			manifest = self.__server.fsystem.get_diff_manifest_remote(packet.get_TLVlist(tlvtype=TLVTYPE['DATA']))
 			self.logger.info('list response received. tlvlist:')
 			for entry in tlvlist:
 				self.logger.info(entry)
@@ -228,33 +229,33 @@ class SignalConnection(Connection):
 	# ocode is either 'REQUEST' or 'RESPONSE'
 	def send_update(self, ocode):
 		packet_to_send = OutPacket()
-		packet_to_send.create_packet(version=self.version, flags=0, senderID=self.server.sender_id,
+		packet_to_send.create_packet(version=self.version, flags=[], senderID=self.__server.sender_id,
 			txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
-			sequence=self.seq_no, ack=self.ack_no, otype='UPDATE', ocode=ocode)  
-		packet_to_send.append_entry_to_TLVlist('DATA', self.server.fsystem.get_hash_manifest())
+			sequence=self.seq_no, ack=self.send_ack_no, otype='UPDATE', ocode=ocode)  
+		packet_to_send.append_entry_to_TLVlist('DATA', self.__server.fsystem.get_hash_manifest())
 		if ocode == CODE['REQUEST']:
 			self.send_packet_reliable(packet_to_send)
 		else:
 			self.send_packet_unreliable(packet_to_send)
-		self.logger.info('update sent, hash %s' % self.server.fsystem.get_hash_manifest())
+		self.logger.info('update sent, hash %s' % self.__server.fsystem.get_hash_manifest())
 	
 	def send_list_request(self):
 		packet_to_send = OutPacket()
-		packet_to_send.create_packet(version=self.version, flags=0, senderID=self.server.sender_id,
+		packet_to_send.create_packet(version=self.version, flags=[], senderID=self.__server.sender_id,
 			txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
-			sequence=self.seq_no, ack=self.ack_no, otype='LIST', ocode='REQUEST')  
+			sequence=self.seq_no, ack=self.send_ack_no, otype='LIST', ocode='REQUEST')  
 		self.send_packet_reliable(packet_to_send)
 		self.logger.info('List request sent')
 	
 	def send_list_response(self):
 		packet_to_send = OutPacket()
-		packet_to_send.create_packet(version=self.version, flags=0, senderID=self.server.sender_id,
+		packet_to_send.create_packet(version=self.version, flags=[], senderID=self.__server.sender_id,
 			txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
-			sequence=self.seq_no, ack=self.ack_no, otype='LIST', ocode='RESPONSE')  
-		packet_to_send.append_list_to_TLVlist('DATA', self.server.fsystem.get_local_manifest())
+			sequence=self.seq_no, ack=self.send_ack_no, otype='LIST', ocode='RESPONSE')  
+		packet_to_send.append_list_to_TLVlist('DATA', self.__server.fsystem.get_local_manifest())
 		self.send_packet_unreliable(packet_to_send)
 		self.logger.info('List response sent. local manifest:')
-		for entry in self.server.fsystem.get_local_manifest():
+		for entry in self.__server.fsystem.get_local_manifest():
 			self.logger.debug(entry)
 
 	def send_fetch_file(self, filename):
@@ -264,9 +265,9 @@ class SignalConnection(Connection):
 		packet_to_send = OutPacket()
 		local_tx_id = random.randint(0, 65535)
 		local_data_port = random.randint(1500, 3000)
-		packet_to_send.create_packet(version=self.version, flags=0, senderID=self.server.sender_id,
+		packet_to_send.create_packet(version=self.version, flags=[], senderID=self.__server.sender_id,
 			txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
-			sequence=self.seq_no, ack=self.ack_no, otype='PULL', ocode='REQUEST')
+			sequence=self.seq_no, ack=self.send_ack_no, otype='PULL', ocode='REQUEST')
 		packet_to_send.append_entry_to_TLVlist('DATA', filename)
 		packet_to_send.append_entry_to_TLVlist('CONTROL', 'local_tx_id?%d' % local_tx_id)
 		packet_to_send.append_entry_to_TLVlist('CONTROL', 'local_port?%d' % local_data_port)
@@ -282,9 +283,9 @@ class SignalConnection(Connection):
 		local_tx_id = random.randint(0, 65535)
 		local_data_port = random.randint(1500, 3000)
 		packet_to_send = OutPacket()
-		packet_to_send.create_packet(version=self.version, flags=0, senderID=self.server.sender_id,
+		packet_to_send.create_packet(version=self.version, flags=[], senderID=self.__server.sender_id,
 			txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
-			sequence=self.seq_no, ack=self.ack_no, otype='PULL', ocode='RESPONSE')
+			sequence=self.seq_no, ack=self.send_ack_no, otype='PULL', ocode='RESPONSE')
 		packet_to_send.append_entry_to_TLVlist('CONTROL', 'remote_tx_id?%d' % remote_tx_id)
 		packet_to_send.append_entry_to_TLVlist('CONTROL', 'remote_port?%d' % remote_data_port)
 		packet_to_send.append_entry_to_TLVlist('CONTROL', 'local_tx_id?%d' % local_tx_id)

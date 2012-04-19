@@ -22,7 +22,7 @@ class Connection:
 	max_session_id = int("FF", 16)
 	max_user_id = int("FF", 16)
 	max_resend_time = 1.0	# Max resend time in secs
-	init_rtt = 1.0
+	init_rtt = 1.0 # Initial RTT in secs
 
 	# TODO check initializations
 	# TODO change server to jsut sock for Connection object

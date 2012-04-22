@@ -3,6 +3,7 @@ import logging, sys, signal, time
 from Configuration import *
 from FileSystem import *
 from PacketManager import *
+from Security import *
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s', datefmt='%d.%m.%y %H:%M:%S', filename='SyncCFT.log', filemode='w')
 console = logging.StreamHandler()
@@ -41,6 +42,7 @@ class SyncCFT:
         
         self.fsystem = FileSystem(self.folder, '.private')
         self.packetmanager = PacketManager()
+        self.security = Security()
         
         self.fsystem.start_thread()
         
@@ -77,7 +79,6 @@ class SyncCFT:
         self.packetmanager.hex_packet()
 
         print "\n\n\n"
-        
         print self.packetmanager.get_version()
         print self.packetmanager.get_flags()
         print self.packetmanager.get_senderID()
@@ -89,6 +90,42 @@ class SyncCFT:
         print self.packetmanager.get_ocode()
         print self.packetmanager.get_TLVlist()
         
+        original_packet = packet[:]
+        
+        print "\n\n\n*********************************************************\n\n\n"
+        print "The following reprensents a communication between 2 peers"
+        
+        password_A= 'ProtocolDesign'
+        password_B= 'ProtocolDesig'
+        
+        (privateKA,publicKA) = self.security.generate_keys(1024)
+        (privateKB,publicKB) = self.security.generate_keys(1024)
+        
+        print "Peer-A wants to send"
+        self.print_hex(original_packet)
+        
+        print "Peer-A encrypts with Public_Key_B"
+        encrypted_packet = self.security.encrypt(publicKB, original_packet)
+        self.print_hex(encrypted_packet)
+        
+        print "Peer-B decrypts with Private_Key_B"
+        decrypted_packet = self.security.decrypt(privateKB, encrypted_packet)
+        self.print_hex(decrypted_packet)
+        
+        if original_packet == decrypted_packet:
+            print "Both packets are the same after the crypto!!!"
+        
+        #This is the hash sent by A
+        exp_publicKA = self.security.export_key(publicKA)
+        hash_A = self.security.calculate_key_hash(exp_publicKA, password_A)
+        
+        #B calculates the following
+        hash_B = self.security.calculate_key_hash(exp_publicKA, password_A)
+        
+        if hash_A == hash_B:
+            print "Access granted!"
+        else:
+            print "Wrong password!"
         
         return
         
@@ -98,7 +135,32 @@ class SyncCFT:
         self.exit_flag = 1
         #sys.exit(1)
         
+    def print_hex(self, text):
+        l = len(text)
+        i = 0
+        while i < l:
+            print "%04x  " % i,
+            for j in range(16):
+                if i+j < l:
+                    print "%02X" % ord(text[i+j]),
+                else:
+                    print "  ",
+                if j%16 == 7:
+                    print "",
+            print " ",
 
+            ascii = text[i:i+16]
+            r=""
+            for i2 in ascii:
+                j2 = ord(i2)
+                if (j2 < 32) or (j2 >= 127):
+                    r=r+"."
+                else:
+                    r=r+i2
+            print r
+            i += 16
+            
+            
 my_app = SyncCFT()
 my_app.start_SyncCFT()
 

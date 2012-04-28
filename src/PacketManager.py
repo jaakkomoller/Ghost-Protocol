@@ -63,33 +63,19 @@ class PacketManager():
         del self.TLVs[:]
         self.bytearrayTLV = ' '
         
-        tempraw = rawdata
-        
-        tmpbyte = ord(tempraw[0])
+        unpacked_header = struct.unpack("!BBHHHLLBBH", rawdata[0:20])
+        (tmpbyte,self.nextTLV,self.senderID,self.txlocalID,self.txremoteID,self.sequence,self.ack,tmptype,tmpcode,self.checksum) = unpacked_header
         self.version = tmpbyte >> 4
         self.flags = tmpbyte & 0x0F
 
-        self.nextTLV = ord(tempraw[1])
-        
-        self.senderID = ord(tempraw[2]) << 8 | ord(tempraw[3])
-        self.txlocalID = ord(tempraw[4]) << 8 | ord(tempraw[5])
-        self.txremoteID = ord(tempraw[6]) << 8 | ord(tempraw[7])
-        self.sequence = ord(tempraw[8]) << 24 | ord(tempraw[9]) << 16 | ord(tempraw[10]) << 8 | ord(tempraw[11])
-        self.ack = ord(tempraw[12]) << 24 | ord(tempraw[13]) << 16 | ord(tempraw[14]) << 8 | ord(tempraw[15])
-        
-        tmptype = ord(tempraw[16])
-        if REV_OPERATION.has_key(tmptype):
-            self.otype = tmptype
+        if REV_OPERATION.has_key(tmptype):  self.otype = tmptype
         else:
             self.logger.error("[packetize_raw] Process failed!! Failed to recover proper TYPE! %d" % (tmptype))
             return False
-        tmpcode = ord(tempraw[17])
-        if REV_CODE.has_key(tmpcode):
-            self.ocode = tmpcode
+        if REV_CODE.has_key(tmpcode):  self.ocode = tmpcode
         else:
             self.logger.error("[packetize_raw] Process failed!! Failed to recover proper CODE! %d" % (tmpcode))
             return False
-        self.checksum = ord(tempraw[18]) << 8 | ord(tempraw[19])
         
         if not self.verify_checksum():
             self.logger.debug("[packetize_raw] Checksum failed!! Failed to recover packet header!")
@@ -108,18 +94,18 @@ class PacketManager():
             else:
                 ctype = ntype
             
-            ntype = ord(tempraw[i:i+TLVTYPESIZE])
+            ntype = ord(rawdata[i:i+TLVTYPESIZE])
             i+=TLVTYPESIZE
             for j in range(0,TLVLENSIZE):
-                temp = tempraw[i]
+                temp = rawdata[i]
                 if ord(temp) == 0:
                     temp = '0'
                 clen += 10**(TLVLENSIZE-j-1) * int(temp)
                 i+=1
-            cvalue = str(tempraw[i:i+clen])
+            cvalue = rawdata[i:i+clen]
             i+=clen
             self.append_entry_to_TLVlist(RAWTLVTYPE[ctype],cvalue)
-        
+                
     def create_TLV_entry(self, ttype, value):
         if len(value)>=10**TLVLENSIZE:
             self.logger.error("Error adding TLV %s:%s:%s" % (ttype, str(len(value)), value))
@@ -247,10 +233,12 @@ class PacketManager():
             else:
                 #Append type of the next element
                 tempstring += struct.pack("!B", self.TLVs[i+1][0])
-            for j in item[1]:
-                tempstring += struct.pack("!B", ord(j))
-            for j in item[2]:
-                tempstring += struct.pack("!B", ord(j))
+            #for j in item[1]:
+            #    tempstring += struct.pack("!B", ord(j))
+            #for j in item[2]:
+            #    tempstring += struct.pack("!B", ord(j))
+            tempstring += item[1]
+            tempstring += item[2]
             i+=1
         
         self.bytearrayTLV = tempstring
@@ -274,7 +262,6 @@ class PacketManager():
                 elif item == 'SEC':
                     flagvalue += 8
                     
-            self.logger.debug("Flagvalue: %d", flagvalue)
             self.flags = flagvalue
                 
     def build_packet(self): 
@@ -283,16 +270,11 @@ class PacketManager():
         #Then build the FLAGs
         self.build_FLAGs()
         
-        self.logger.debug("In build packet. self.flags=%s", self.flags)
         #Then we can calculate the checksum for the protocol header
         self.checksum = self.calculate_checksum()
         byte1 = self.version << 4 | self.flags
         #Now we can proceed packing the whole structure for network transferring
-        packet = struct.pack("!BB",byte1,self.nextTLV)+struct.pack("!H",self.senderID)+\
-                    struct.pack("!H",self.txlocalID)+struct.pack("!H",self.txremoteID)+\
-                    struct.pack("!L",self.sequence)+struct.pack("!L",self.ack)+\
-                    struct.pack("!BB",self.otype,self.ocode)+struct.pack("!H",self.checksum)+\
-                    self.bytearrayTLV
+        packet = struct.pack("!BBHHHLLBBH",byte1,self.nextTLV,self.senderID,self.txlocalID,self.txremoteID,self.sequence,self.ack,self.otype,self.ocode,self.checksum)+self.bytearrayTLV
         return packet
     
     def get_packet_length(self):

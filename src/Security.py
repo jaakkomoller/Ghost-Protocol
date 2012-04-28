@@ -2,6 +2,7 @@ import hashlib, logging
 from Crypto.PublicKey import RSA
 from Crypto import Cipher
 
+
 class Security:
     def __init__(self):
         self.logger = logging.getLogger("Crypto/Security")

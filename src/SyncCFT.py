@@ -76,8 +76,13 @@ class SyncCFT:
         
         
         packet = self.packetmanager.build_packet()
+        
+        print "This is the packet dump"
         self.packetmanager.hex_packet()
-
+        
+        raw_data = '\x29\x02\xAB\xCD\xFE\xEA\xFE\xE0\xBB\xCC\xDD\xEE\x11\x11\x11\x11\x01\x01\x4C\xA9\x02\x30\x30\x30\x38\x6F\x6E\x65\x65\x65\x65\x65\x65\x02\x30\x30\x31\x30\x74\x77\x6F\x6F\x6F\x6F\x6F\x6F\x6F\x6F\xFF\x30\x30\x31\x31\x74\x68\x72\x65\x65\x65\x65\x65\x65\x65\x65'
+        raw_packet = self.packetmanager.create_packet(rawdata = raw_data)
+        
         print "\n\n\n"
         print self.packetmanager.get_version()
         print self.packetmanager.get_flags()
@@ -90,6 +95,7 @@ class SyncCFT:
         print self.packetmanager.get_ocode()
         print self.packetmanager.get_TLVlist()
         
+        '''
         original_packet = packet[:]
         
         print "\n\n\n*********************************************************\n\n\n"
@@ -126,6 +132,7 @@ class SyncCFT:
             print "Access granted!"
         else:
             print "Wrong password!"
+        '''
         
         return
         
@@ -159,7 +166,6 @@ class SyncCFT:
                     r=r+i2
             print r
             i += 16
-            
             
 my_app = SyncCFT()
 my_app.start_SyncCFT()

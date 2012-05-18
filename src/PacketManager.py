@@ -7,12 +7,12 @@ To do:
 
 import logging, struct
 
-MAXPKTSIZE = 60
+MAXPKTSIZE = 500
 TLVTYPESIZE = 1
 TLVLENSIZE = 4
 NULLTLV = 0xFF
-TLVTYPE = {'CONTROL':1, 'DATA':2, 'SECURITY':3}
-RAWTLVTYPE = {1:'CONTROL', 2:'DATA', 3:'SECURITY'}
+TLVTYPE = {'TXCONTROL':1, 'DATACONTROL':2, 'DATA':3, 'SECURITY':4}
+RAWTLVTYPE = {1:'TXCONTROL', 2:'DATACONTROL', 3:'DATA', 4:'SECURITY'}
 OPERATION = {'HELLO':1, 'UPDATE':2, 'LIST':3, 'PULL':4, 'DATA':5}
 CODE = {'REQUEST':1, 'RESPONSE':2}
 REV_OPERATION = {1:'HELLO', 2:'UPDATE', 3:'LIST', 4:'PULL', 5:'DATA'}
@@ -122,7 +122,12 @@ class PacketManager():
             self.TLVs.append(tlventry)
             return True
         
-        print "Failed to add TVL"
+        if tlventry == None:
+            print '1'
+        if self.get_packet_length() >= MAXPKTSIZE:
+            print '2'
+        print "Failed to add TVL: %s, %s" % (ttype, value)
+        exit(0)
         return False
         
     def append_list_to_TLVlist(self, ttype, infolist): #infolist coded as [value,value...]

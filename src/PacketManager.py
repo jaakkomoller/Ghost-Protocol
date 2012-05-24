@@ -7,7 +7,7 @@ To do:
 
 import logging, struct
 
-MAXPKTSIZE = 500
+MAXPKTSIZE = 1400
 TLVTYPESIZE = 1
 TLVLENSIZE = 4
 NULLTLV = 0xFF
@@ -288,20 +288,26 @@ class PacketManager():
             packet_size += (len(item[2])+5)
         return packet_size
         
-    def print_packet(self):
-        print "version: '%s':'%x'" % (self.version,self.version)
-        print "flags: '%s':'%x'" % (self.flags,self.flags)
-        print "nextTLV: '%s':'%.2x'" % (self.nextTLV,self.nextTLV)
-        print "senderID: '%s':'%.2x'" % (self.senderID,self.senderID)
-        print "txlocalID: '%s':'%.2x'" % (self.txlocalID,self.txlocalID)
-        print "txremoteID: '%s':'%.2x'" % (self.txremoteID,self.txremoteID)
-        print "sequence: '%s':'%.2x'" % (self.sequence,self.sequence)
-        print "ack: '%s':'%.2x'" % (self.ack,self.ack)
-        print "otype: '%s':'%.2x'" % (self.otype,self.otype)
-        print "ocode: '%s':'%.2x'" % (self.ocode,self.ocode)
-        print "checksum: '%s':'%.2x'" % (self.checksum,self.checksum)
+    def __str__(self):
+        ret = "version: '%s':'%x'\n" % (self.version,self.version)
+        ret += "flags: '%s':'%x'\n" % (self.flags,self.flags)
+        ret += "nextTLV: '%s':'%.2x'\n" % (self.nextTLV,self.nextTLV)
+        ret += "senderID: '%s':'%.2x'\n" % (self.senderID,self.senderID)
+        ret += "txlocalID: '%s':'%.2x'\n" % (self.txlocalID,self.txlocalID)
+        ret += "txremoteID: '%s':'%.2x'\n" % (self.txremoteID,self.txremoteID)
+        ret += "sequence: '%s':'%.2x'\n" % (self.sequence,self.sequence)
+        ret += "ack: '%s':'%.2x'\n" % (self.ack,self.ack)
+        ret += "otype: '%s':'%.2x'\n" % (REV_OPERATION[self.otype],self.otype)
+        ret += "ocode: '%s':'%.2x'\n" % (REV_CODE[self.ocode],self.ocode)
+        ret += "checksum: '%s':'%.2x'\n" % (self.checksum,self.checksum)
+        if self.TLVs:
+            ret += "tlvs:\n"
+            ret += "\n".join(["%s:%s:%s" % (RAWTLVTYPE[tlv[0]], tlv[1], tlv[2]) for tlv in self.TLVs])
+        else:
+            ret += 'no tlvs'
+
+        return ret
         
-    
     def hex_packet(self):
         packet = self.build_packet()
         x=str(packet)

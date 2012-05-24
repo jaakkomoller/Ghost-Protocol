@@ -36,6 +36,7 @@ class SignalServer(Thread):
         self.sock.settimeout(0.5) # So we can exit and wont block forever in recvfrom
 
         self.received_packet = InPacket()
+        self.connection_list_lock = thread.allocate_lock()
 
 
     def run(self):
@@ -51,16 +52,16 @@ class SignalServer(Thread):
                     continue
                 else:
                     self.logger.alarm("error with socket")
-            self.logger.info("received message")
             self.received_packet.packetize_raw(data)
             self.received_packet.receive_time = time.time()
-            self.received_packet.print_packet()
+            self.logger.info("received packet:\n%s" % str(self.received_packet))
             found = False
+            self.connection_list_lock.acquire()
             for connection in self.connection_list:
                 if self.received_packet.txremoteID == connection.local_session_id:
+                    self.logger.info("packet belongs to existing connection. processing...")
                     connection.handle(self.received_packet)
                     found = True
-                    self.logger.info("packet belongs to existing connection")
                     break
             if not found and self.received_packet.otype == OPERATION['HELLO'] and \
                     self.received_packet.ocode == CODE['REQUEST'] :
@@ -76,6 +77,10 @@ class SignalServer(Thread):
                 self.connection_list.append(connection)
                 self.logger.info("hello packet received, new connection established\
 (local id %d, remote id %d) and HELLO sent" % (connection.local_session_id, connection.remote_session_id))
+            elif not found:
+                self.logger.info("Packet does not belong to any connection and not a valid HELLO. Discarding.")
+            self.logger.info("done with packet.\n")
+            self.connection_list_lock.release()
                 
 
 
@@ -133,18 +138,22 @@ class SignalConnection(Connection):
     def hello_recv(self, packet):
         self.receive_packet(packet)
         packet_to_send = OutPacket()
+        self.send_ack_no = packet.sequence
         packet_to_send.create_packet(version=self.version, flags=[], senderID=self.__server.sender_id,
             txlocalID=self.local_session_id, txremoteID=self.remote_session_id, sequence=self.seq_no,
             ack=self.send_ack_no, otype='HELLO', ocode='RESPONSE')  
-        self.send_packet_unreliable(packet_to_send)
+        self.send_packet_unreliable(packet_to_send, syn_ack = True)
         self.state = Connection.State.HELLO_RECVD
         # TODO set timers
     
     def handle(self, packet):
-        self.receive_packet(packet)
+        # self.receive_packet returns True of the seq no is in line
+        in_line = self.receive_packet(packet)
         if packet.otype == OPERATION['HELLO'] and packet.ocode == CODE['RESPONSE'] and \
-                self.state == Connection.State.HELLO_SENT:
+                self.state == Connection.State.HELLO_SENT and packet.ack == self.seq_no_minus(1):
+            self.logger.info('HELLO response received while status == HELLO_SENT')
             self.remote_session_id = packet.txlocalID
+            self.send_ack_no = packet.sequence
             packet_to_send = OutPacket()
             packet_to_send.create_packet(version=self.version, flags=[], senderID=self.__server.sender_id,
                 txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
@@ -154,36 +163,43 @@ class SignalConnection(Connection):
             self.state = Connection.State.CONNECTED
             self.logger.info('state set to connected')
         elif packet.otype == OPERATION['HELLO'] and packet.ocode == CODE['RESPONSE'] and \
-                self.state == Connection.State.HELLO_RECVD:
+                self.state == Connection.State.HELLO_RECVD and packet.ack == self.seq_no_minus(1):
+            self.logger.info('HELLO response received while status == HELLO_RECVD')
             self.state = Connection.State.CONNECTED
             self.logger.info('state set to connected')
             self.send_update('REQUEST')
         elif packet.otype == OPERATION['HELLO'] and packet.ocode == CODE['RESPONSE'] and \
                 self.state == Connection.State.CONNECTED:
+            self.logger.info('HELLO response received while status == CONNECTED')
             pass
         elif packet.otype == OPERATION['HELLO'] and packet.ocode == CODE['REQUEST'] and \
                 self.state == Connection.State.HELLO_RECVD:
+            self.logger.info('HELLO REQUEST received while status == HELLO_RECVD')
             self.hello_recv(packet)
         elif packet.otype == OPERATION['UPDATE'] and \
                 self.state == Connection.State.CONNECTED:
-            if not packet.TLVs:
-                self.logger.warning('update packet has no TLVs!')
             if packet.ocode == CODE['REQUEST']:
-                self.logger.info('update request received')
+                self.logger.info('UPDATE REQUEST received')
                 self.send_update('RESPONSE')
             else:
-                self.logger.info('update response received')
+                self.logger.info('UPDATE RESPONSE received')
+            got_hash = False
             for entry in packet.TLVs:
-                if entry[0] == 'DATA':
+                if entry[0] == TLVTYPE['DATA']:
                     self.logger.info('hash: %s' % entry[2])
+                    got_hash = True
                     if self.__server.fsystem.get_hash_manifest() != entry[2]:
                         self.logger.info('hash files differ')
                         self.send_list_request()
+            if not got_hash:
+                self.logger.info('UPDATE did not contain hash')
         elif packet.otype == OPERATION['LIST'] and packet.ocode == CODE['REQUEST'] and \
                 self.state == Connection.State.CONNECTED:
+            self.logger.info('LIST REQUEST received')
             self.send_list_response()
         elif packet.otype == OPERATION['LIST'] and packet.ocode == CODE['RESPONSE'] and \
                 self.state == Connection.State.CONNECTED:
+            self.logger.info('LIST RESPONSE received')
             tlvlist = packet.get_TLVlist(tlvtype='DATA')
             manifest = self.__server.fsystem.get_diff_manifest_remote(packet.get_TLVlist(tlvtype='DATA'))
             self.logger.info('list response received. tlvlist:')
@@ -196,6 +212,7 @@ class SignalConnection(Connection):
                     self.send_fetch_file(entry.split('?')[1])
         elif packet.otype == OPERATION['PULL'] and packet.ocode == CODE['REQUEST'] and \
                 self.state == Connection.State.CONNECTED:
+            self.logger.info('PULL REQUEST received')
             tlvlist = packet.get_TLVlist(tlvtype='DATA')
             if len(tlvlist) > 0:
                 
@@ -214,6 +231,7 @@ class SignalConnection(Connection):
                     self.send_fetch_file_response(remote_tx_id, remote_port)
         elif packet.otype == OPERATION['PULL'] and packet.ocode == CODE['RESPONSE'] and \
                 self.state == Connection.State.CONNECTED:
+            self.logger.info('PULL RESPONSE received')
             tlvlist = packet.get_TLVlist(tlvtype='DATACONTROL')
             remote_port = -1
             remote_tx_id = -1
@@ -227,16 +245,17 @@ class SignalConnection(Connection):
             tlv_string = ""
             for tlv in packet.TLVs:
                 tlv_string += tlv[2] + ","
-            self.logger.info('pull response received, tlvs: %s' % tlv_string)
+            self.logger.info('tlvs: %s' % tlv_string)
         else:
-            self.logger.info('invalid packet or state')
+            self.logger.error('invalid packet or state')
     
-        if self.resend_send_ack == True:
+        if self.state == Connection.State.CONNECTED and self.resend_send_ack == True:
             # We got new seq but did not ack it
+            self.logger.info('Packet processed. Client waiting for ACK, so acking.')
             packet_to_send = OutPacket()
             packet_to_send.create_packet(version=self.version, flags=[], senderID=self.__server.sender_id,
                 txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
-                sequence=self.seq_no, ack=self.send_ack_no, otype='UPDATE', ocode=CODE['RESPONSE'])
+                sequence=self.seq_no, ack=self.send_ack_no, otype='UPDATE', ocode='RESPONSE')
             self.send_packet_unreliable(packet_to_send)
 
 
@@ -249,7 +268,7 @@ class SignalConnection(Connection):
         h = self.__server.fsystem.get_hash_manifest()
         print h
         packet_to_send.append_entry_to_TLVlist('DATA', h)
-        if ocode == CODE['REQUEST']:
+        if ocode == 'REQUEST':
             self.send_packet_reliable(packet_to_send)
         else:
             self.send_packet_unreliable(packet_to_send)
@@ -270,7 +289,7 @@ class SignalConnection(Connection):
             packet_to_send.create_packet(version=self.version, flags=[], senderID=self.__server.sender_id,
                 txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
                 sequence=self.seq_no, ack=self.send_ack_no, otype='LIST', ocode='RESPONSE')  
-            packet_to_send.append_to_TLVlist('DATA', line)
+            packet_to_send.append_entry_to_TLVlist('DATA', line)
             self.send_packet_unreliable(packet_to_send)
         self.logger.info('List response sent. local manifest:')
         for entry in self.__server.fsystem.get_local_manifest():

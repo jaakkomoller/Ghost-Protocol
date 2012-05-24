@@ -2,6 +2,7 @@ import time
 from Connection import *
 from PacketManager import *
 
+test_string = "".join(['*' for i in range(1000)])
 
 def main():
 
@@ -61,18 +62,20 @@ def client(p, q):
     receiver.start()
     
     data = 10
+    str_data = "%s%d" % (test_string, data)
     while True:
         packet_to_send = OutPacket()
         packet_to_send.create_packet(version=connection.version, flags=[], senderID=sender_id,
             txlocalID=connection.local_session_id, txremoteID=connection.remote_session_id,
             sequence=connection.seq_no, ack=connection.send_ack_no, otype='UPDATE', ocode='REQUEST')
-        packet_to_send.append_entry_to_TLVlist('DATA', str(data))
+        packet_to_send.append_entry_to_TLVlist('DATA', str_data)
 
         if connection.send_packet_reliable(packet_to_send) == False:
             logger.info("send failed. sleeping")
             time.sleep(0.1)
         else:
             data = (data + 1) % 100000
+            str_data = "%s%d" % (test_string, data)
 
 
 def server(p, q):
@@ -101,7 +104,7 @@ def server(p, q):
         received_packet.receive_time = time.time()
         #received_packet.print_packet()
         if connection.receive_packet(received_packet):
-            received_data = int(received_packet.get_TLVlist(tlvtype = 'DATA')[0])
+            received_data = int(received_packet.get_TLVlist(tlvtype = 'DATA')[0][1000:])
             if exp_data != received_data:
                 logger.error("invalid data: %d, expected: %d" % (received_data, exp_data))
                 exit(0)

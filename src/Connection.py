@@ -32,11 +32,11 @@ class debugmeta(type):
         return cls.measure_process_time / cls.getTotal() * 100.0
 
     def __str__(cls):
-        return 'sr %.2f %, sur %.2f %, r %.2f %, m %.2f %' % (cls.getSendRPer(), cls.getSendURPer(),
+        return 'sr %.2f %%, sur %.2f %%, r %.2f %%, m %.2f %%' % (cls.getSendRPer(), cls.getSendURPer(),
             cls.getRecPer(), cls.getMeaPer())
 
     def __repr__(cls):
-        return 'Connection.debug, sr %.2f %, sur %.2f %, r %.2f %, m %.2f %' % \
+        return 'Connection.debug, sr %.2f %%, sur %.2f %%, r %.2f %%, m %.2f %%' % \
             (cls.getSendRPer(), cls.getSendURPer(),
             cls.getRecPer(), cls.getMeaPer())
 
@@ -58,7 +58,7 @@ class Connection:
     max_seq = int("FFFF", 16)
     max_session_id = int("FF", 16)
     max_user_id = int("FF", 16)
-    max_resend_time = 1.0    # Max resend time in secs
+    max_resend_time = 10.0    # Max resend time in secs
     init_rtt = 1.0 # Initial RTT in secs
 
     # TODO check initializations
@@ -80,15 +80,18 @@ class Connection:
         self.remote_session_id = remote_session_id
         self.state = Connection.State.UNCONNECTED
         self.__setRtt__(rtt)
-        self.unack_timer = Connection.NoAckTimer(self)
         self.remote_send_time = 0.0
         self.remote_send_time_receive_time = 0.0
         self.unack_queue = RingBuffer(10)    # Queue of sent, but unacked packets
         self.sync = thread.allocate_lock()
         self.resends = 0
-        
-        self.logger = logging.getLogger(logger_str + str(self.remote_ip) + ':' + str(self.remote_port))
+
+        logger_str += str(self.remote_ip) + ':' + str(self.remote_port)
+        self.logger = logging.getLogger(logger_str)
         self.logger.info("Initializing connection to %s:%i at %s" % (self.remote_ip, self.remote_port, str(time.time())))
+
+        self.unack_timer = None
+        self.unack_timer_lock = thread.allocate_lock()
 
         self.resend_send_ack = False
 
@@ -97,7 +100,7 @@ class Connection:
         self.sync.acquire()
         self.resends = 0
 
-        if packet.sequence <= self.send_ack_no:
+        if packet.sequence <= self.send_ack_no and packet.sequence != Connection.max_seq:
             self.resend_send_ack = True
 
         if packet.sequence != Connection.max_seq and \
@@ -118,7 +121,7 @@ class Connection:
             
 
         # Read control data
-        for item in control_tlvs:
+        '''for item in control_tlvs:
             t = struct.unpack('i', item[:4])[0]
             if t == TXCONTROLTYPE['SENDWIN']:
                 # Send window
@@ -136,7 +139,7 @@ class Connection:
                 self.logger.debug("rtt set to: %f" % self.rtt)
             else:
                 self.logger.error("Invalid control message: %i" % t)
-
+        '''
 
 
         self.logger.debug("ack no: %d, packets in unack queue before packet: %d, seq nos: %s" % \
@@ -170,11 +173,12 @@ class Connection:
             self.logger.error("Error in packet reception: oldest packet not found, but packets still in unack queue")
             sys.exit()
 
-        if oldest:
+        if not oldest:
+            self.cancel_resend_timer()
+        elif oldest != self.unack_timer.getPacket():
+            self.logger.debug("Setting resend timer to %f" % (3 * self.rtt))
             # TODO Set timer from the current time
-            self.unack_timer.reset_timer(3*self.rtt, oldest) 
-        else:
-            self.unack_timer.cancel()
+            self.reset_resend_timer(3*self.rtt, oldest) 
             
         self.sync.release()
         debug.receive_process_time += time.time() - start
@@ -193,29 +197,38 @@ class Connection:
 
         self.__send_out(packet)
 
-        self.seq_no = (self.seq_no + 1) % Connection.max_seq
+        self.seq_no = self.seq_no_plus(1)
         if self.unack_queue.getSize() == 0:
-            self.unack_timer.reset_timer(3*self.rtt, packet)
+            self.reset_resend_timer(3*self.rtt, packet)
             self.logger.debug('unack queue is empty')
         else:
             self.logger.debug('unack queue is not empty')
-            if self.unack_timer.isCancelled():
-                self.logger.error('Unack timer not running altough packets in unack queue, state %s' % self.unack_timer.getState())
-                exit(0)
+            #if self.unack_timer.isCancelled():
+            #    self.logger.error('Unack timer not running altough packets in unack queue, state %s' % self.unack_timer.getState())
+            #    exit(0)
         self.unack_queue.append(packet)
         self.local_send_window = self.max_local_send_window - self.unack_queue.getSize()
         self.logger.debug('Packet sent reliably, packets in queue: %d resend timer state %s, tlvs in packet %d'\
             % (self.unack_queue.getSize(), str(self.unack_timer.getState()), len(packet.TLVs)))
+        self.print_resend_timer()
         self.sync.release()
         debug.send_r_process_time += time.time() - start
         return True
 
-    def send_packet_unreliable(self, packet):
+    def send_packet_unreliable(self, packet, syn_ack = False):
         start = time.time()
         self.sync.acquire()
-        packet.sequence = Connection.max_seq
+
+        if not syn_ack:
+            # ffff marks unreliable packet. Syn_ack should contain seq no though.
+            packet.sequence = Connection.max_seq
+        else:
+            packet.sequence = self.seq_no
 
         self.__send_out(packet)
+
+        if syn_ack:
+            self.seq_no = self.seq_no_plus(1)
 
         self.logger.debug('Packet sent unreliably')
         self.sync.release()
@@ -228,19 +241,22 @@ class Connection:
         packet.purge_tlvs(ttype = 'TXCONTROL')
         
         # Include send time for RTT measurement
-        packet.append_entry_to_TLVlist('TXCONTROL', struct.pack('if', TXCONTROLTYPE['SENDTIME'], time.time()))
+        #packet.append_entry_to_TLVlist('TXCONTROL', struct.pack('if', TXCONTROLTYPE['SENDTIME'], time.time()))
 
         # Include send window for window management
-        packet.append_entry_to_TLVlist('TXCONTROL', struct.pack('ii', TXCONTROLTYPE['SENDWIN'], \
-            self.local_send_window))
+        #packet.append_entry_to_TLVlist('TXCONTROL', struct.pack('ii', TXCONTROLTYPE['SENDWIN'], \
+        #    self.local_send_window))
         
         # Echo send time for RTT measurement
-        if self.remote_send_time != 0.0:
+        '''if self.remote_send_time != 0.0:
             packet.append_entry_to_TLVlist('TXCONTROL', struct.pack('iff', TXCONTROLTYPE['OSENDTIME'], \
                 self.remote_send_time, time.time() - self.remote_send_time_receive_time))
             self.remote_send_time = 0.0
             self.remote_send_time_receive_time = 0.0
+        '''
 
+        self.logger.debug('sending: \n%s' % str(packet))
+        
         packet.send_time = time.time()
         self.resend_send_ack = False
 
@@ -261,171 +277,165 @@ class Connection:
         if rtt >= 0:
             self.rtt = rtt
         else:
-            self.logger.debug('Invalid RTT: %f' % rtt)
+            self.logger.debug('Invalid RTT: %f. Setting to init RTT.' % rtt)
             self.rtt = Connection.init_rtt
+        if self.rtt > 1.0:
+            self.logger.debug("RTT set to over 1 second.")
 
     def stop(self):
         if self.unack_timer and self.unack_timer.isAlive():
             self.unack_timer.stop()
             
+    def seq_no_plus(self, num):
+        # Returns the modulo of the seq no plus num
+        return wrapped_plus(self.seq_no, num, self.max_seq -1)
 
-    class NoAckTimer(Thread):
+    def seq_no_minus(self, num):
+        # Returns the modulo of the seq no minus num
+        return wrapped_minus(self.seq_no, num, self.max_seq -1)
+
+    def reset_resend_timer(self, zzz, packet):
+        self.unack_timer_lock.acquire()
+        if self.unack_timer != None:
+            self.logger.debug('Resetting existing resend timer.')
+            self.unack_timer.reset(zzz, packet)
+        else:
+            self.logger.debug('Creating resend timer.')
+            logger_str = str(self.remote_ip) + ':' + str(self.remote_port)
+            self.unack_timer = Connection.ResendTimer(self, logger_str, self.unack_timer_lock, zzz, packet)
+            self.unack_timer.start()
+        self.unack_timer_lock.release()
+
+    def cancel_resend_timer(self):
+        self.unack_timer_lock.acquire()
+        if self.unack_timer != None:
+            self.unack_timer.cancel()
+            self.unack_timer = None
+        self.unack_timer_lock.release()
+
+    def print_resend_timer(self):
+        self.unack_timer_lock.acquire()
+        if self.unack_timer != None:
+            self.logger.debug(self.unack_timer.str_locked())
+        else:
+            self.logger.debug('No resend timer.')
+        self.unack_timer_lock.release()
+
+    class ResendTimer(Thread):
         class State:
-            not_started = 0
-            waiting = 1
-            waiting_cancelled = 2
-            sleeping = 3
-            sleeping_cancelled = 4
-            killed = 5
+            sleeping = 0
+            reset = 1
+            cancelled = 2
 
-        def __init__(self, connection):
+        def __init__(self, connection, logger_str, sync, zzz, packet):
             Thread.__init__(self)
             self.__connection = connection
             self.__when_to_wake = 0.0
-            self.__zzz = 0.0
-            self.__waiting_for_packet = None    # Packet we are waiting to be acked.
-            self.__run_permission = thread.allocate_lock()
-            self.__sync = thread.allocate_lock()
-            self.__state = Connection.NoAckTimer.State.not_started
+            self.__state = Connection.ResendTimer.State.sleeping
+
+            self.__waiting_for_packet = packet
+            self.setZzz(zzz)
+            self.__when_to_wake = time.time() + self.__zzz
+
+            self.__sync = sync
+
+            self.logger = logging.getLogger(logger_str + ' resend_timer')
+            self.logger.debug("Resend timer created.")
 
         def run(self):
-            self.__sync.acquire()
+            # Here be dragons...
             while True:
-                if self.__state != Connection.NoAckTimer.State.waiting_cancelled:
-                    self.__state = Connection.NoAckTimer.State.waiting
-                self.__sync.release()
-                self.__run_permission.acquire()
                 self.__sync.acquire()
-
-                if self.__state == Connection.NoAckTimer.State.killed:
-                    # Someone killed us
-                    self.__sync.release()
-                    return
-                
-                self.__state = Connection.NoAckTimer.State.sleeping
-
                 time_to_sleep = self.__when_to_wake - time.time()
-                if time_to_sleep > 0:
-                    # Sleep
-                    self.__sync.release()
-                    time.sleep(time_to_sleep)
-                    self.__sync.acquire()
-                
-                if self.__state == Connection.NoAckTimer.State.killed:
-                    # Someone killed us
+
+                if time_to_sleep < 0:
+                   time_to_sleep = 0
+
+                # Sleep
+                self.__sync.release()
+                time.sleep(time_to_sleep)
+                self.__sync.acquire()
+            
+                if self.__state == Connection.ResendTimer.State.cancelled:
+                    # Timer cancelled
                     self.__sync.release()
                     return
-
-                if self.__state == Connection.NoAckTimer.State.sleeping_cancelled:
-                    # Someone reset or cancelled the timer
+                elif self.__state == Connection.ResendTimer.State.reset:
+                    # Reset timer and resend
+                    self.__state = Connection.ResendTimer.State.sleeping
+                    self.__sync.release()
                     continue
-
-                if self.__state == Connection.NoAckTimer.State.sleeping:
-                    # Resend
+                else:
+                    # Should resend
                     self.__connection.no_ack_timeout(self.__waiting_for_packet)
 
                     # Resend again with doubled timeout
                     if self.__connection.resends > 5:
                         self.setZzz(self.__zzz * 2)
                     self.__when_to_wake = time.time() + self.__zzz
-                    try:
-                        # Might throw an error if lock is already free..
-                        self.__run_permission.release()
-                    except:
-                        pass
+
+                    self.__sync.release()
+                    continue
             
     
-        def reset_timer(self, zzz, packet):
-            self.__sync.acquire()
+        def reset(self, zzz, packet):
+            # You should hold the lock when coming here.
             self.__waiting_for_packet = packet
             self.setZzz(zzz)
             self.__when_to_wake = time.time() + self.__zzz
-            if self.__state == Connection.NoAckTimer.State.not_started:
-                # Must have not run yet
-                # Lock is initially released
-                self.start()
-            elif self.__state == Connection.NoAckTimer.State.waiting or \
-                    self.__state == Connection.NoAckTimer.State.waiting_cancelled:
-                # Must be waiting for permission to run
-                try:
-                    # Might throw an error if lock is already free..
-                    self.__run_permission.release()
-                except:
-                    pass
-            elif self.__state == Connection.NoAckTimer.State.sleeping or \
-                    self.__state == Connection.NoAckTimer.State.sleeping_cancelled:
-                # Must be sleeping
-                self.state = Connection.NoAckTimer.State.sleeping_cancelled
-                try:
-                    # Might throw an error if lock is already free..
-                    self.__run_permission.release()
-                except:
-                    pass
-            else:
-                print 'invalid state'
-                sys.exit(0)
-            self.__sync.release()
-
+            
+            self.__state = Connection.ResendTimer.State.reset
     
         def cancel(self):
-            self.__sync.acquire()
-            if self.__state == Connection.NoAckTimer.State.sleeping:
-                self.__state = Connection.NoAckTimer.State.sleeping_cancelled
-            elif self.__state == Connection.NoAckTimer.State.waiting:
-                self.__state = Connection.NoAckTimer.State.waiting_cancelled
-            self.__sync.release()
-
-        def kill(self):
-            self.__sync.acquire()
-            self.__state = Connection.NoAckTimer.State.killed
-            try:
-                # Might throw an error if lock is already free..
-                self.__run_permission.release()
-            except:
-                pass
-            self.__sync.release()
+            # You should hold the lock when coming here.
+            self.__state = Connection.ResendTimer.State.cancelled
+            self.logger.debug("Resend timer cancelled.")
 
         def getState(self):
             self.__sync.acquire()
-            if self.__state == Connection.NoAckTimer.State.not_started:
-                self.__sync.release()
-                return 'not started'
-            elif self.__state == Connection.NoAckTimer.State.waiting:
-                self.__sync.release()
-                return 'waiting'
-            elif self.__state == Connection.NoAckTimer.State.waiting_cancelled:
-                self.__sync.release()
-                return 'waiting cancelled'
-            elif self.__state == Connection.NoAckTimer.State.sleeping:
-                self.__sync.release()
+            ret = self.getStateLocked()
+            self.__sync.release()
+            return ret
+
+        def getStateLocked(self):
+            if self.__state == Connection.ResendTimer.State.sleeping:
                 return 'sleeping'
-            elif self.__state == Connection.NoAckTimer.State.sleeping_cancelled:
-                self.__sync.release()
-                return 'sleeping cancelled'
-            elif self.__state == Connection.NoAckTimer.State.killed:
-                self.__sync.release()
-                return 'killed'
+            elif self.__state == Connection.ResendTimer.State.cancelled:
+                return 'cancelled'
+            elif self.__state == Connection.ResendTimer.State.reset:
+                return 'reset'
             else:
-                self.__sync.release()
-                return 'invalid state'
+                self.logger.error("Invalid state.")
+                exit()
 
         def getPacket(self):
             return self.__waiting_for_packet
 
         def setZzz(self, zzz):
-            if zzz > Connection.max_resend_time:
+            if zzz > Connection.max_resend_time or zzz <= 0:
+                if zzz > Connection.max_resend_time:
+                    self.logger.debug("Resend time above max resend time. Setting to max resend time.")
+                else:
+                    self.logger.debug("Negative resend time provided. Setting to max resend time.")
                 self.__zzz = Connection.max_resend_time
             else:
                 self.__zzz = zzz
 
-        def isCancelled(self):
-            self.__sync.acquire()
-            ret = self.__state == Connection.NoAckTimer.State.waiting_cancelled or \
-                (self.__state == Connection.NoAckTimer.State.sleeping_cancelled and \
-                self.__run_permission.locked()) or \
-                self.__state == Connection.NoAckTimer.State.killed
-            self.__sync.release()
-            return ret
+
+        def __str__(self):
+            state = self.getState()
+            if state != 'cancelled':
+                return 'Resend timer. State: %s, time to wake: %f' % (state, self.__when_to_wake - time.time())
+            else:
+                return 'Resend timer. State: %s' % state
+
+        def str_locked(self):
+            state = self.getStateLocked()
+            if state != 'cancelled':
+                return 'Resend timer. State: %s, time to wake: %f' % (state, self.__when_to_wake - time.time())
+            else:
+                return 'Resend timer. State: %s' % state
+
 
 class RingBuffer:
     def __init__(self, size):
@@ -456,6 +466,7 @@ class RingBuffer:
     
     def set(self, data):
         self.data = data
+
 
 class LossySocket(object):
     class State:
@@ -533,4 +544,8 @@ class LossySocket(object):
 #            self.logger.debug("simulated loss")
             
 
+def wrapped_plus(num1, num2, modulo):
+    return (num1 + num2) % modulo
 
+def wrapped_minus(num1, num2, modulo):
+    return (modulo + num1 - num2) % modulo

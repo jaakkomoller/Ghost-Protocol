@@ -66,7 +66,7 @@ class ClientSender(Thread):
             packet_to_send.append_entry_to_TLVlist('DATA', str_data)
 
             if self.connection.send_packet_reliable(packet_to_send) == False:
-                self.logger.info("send failed. sleeping")
+                #self.logger.info("send failed. sleeping")
                 time.sleep(0.1)
             else:
                 data = (data + 1) % 100000
@@ -129,7 +129,7 @@ def server(p, q):
             received_packet.receive_time = time.time()
         #received_packet.print_packet()
             if connection.receive_packet(received_packet):
-                #print 'testing %d' % exp_data
+                print 'testing %d' % exp_data
                 received_data = int(received_packet.get_TLVlist(tlvtype = 'DATA')[0][1000:])
                 if exp_data != received_data:
                     logger.error("invalid data: %d, expected: %d" % (received_data, exp_data))

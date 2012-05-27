@@ -283,8 +283,10 @@ class Connection:
             self.logger.debug("RTT set to over 1 second.")
 
     def stop(self):
+        self.resend_timer_lock.acquire()
         if self.resend_timer and self.resend_timer.isAlive():
             self.resend_timer.cancel()
+        self.resend_timer_lock.release()
             
     def seq_no_plus(self, num):
         # Returns the modulo of the seq no plus num
@@ -402,7 +404,6 @@ class Connection:
         def cancel(self):
             # You should hold the lock when coming here.
             self.__state = Connection.ResendTimer.State.cancelled
-            self.logger.debug("Resend timer cancelled.")
 
         def getState(self):
             self.__sync.acquire()

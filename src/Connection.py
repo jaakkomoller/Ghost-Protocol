@@ -90,8 +90,8 @@ class Connection:
         self.logger = logging.getLogger(logger_str)
         self.logger.info("Initializing connection to %s:%i at %s" % (self.remote_ip, self.remote_port, str(time.time())))
 
-        self.unack_timer = None
-        self.unack_timer_lock = thread.allocate_lock()
+        self.resend_timer = None
+        self.resend_timer_lock = thread.allocate_lock() # Synchronization for resend timer handling
 
         self.resend_send_ack = False
 
@@ -175,7 +175,7 @@ class Connection:
 
         if not oldest:
             self.cancel_resend_timer()
-        elif oldest != self.unack_timer.getPacket():
+        elif oldest != self.resend_timer.getPacket():
             self.logger.debug("Setting resend timer to %f" % (3 * self.rtt))
             # TODO Set timer from the current time
             self.reset_resend_timer(3*self.rtt, oldest) 
@@ -203,13 +203,13 @@ class Connection:
             self.logger.debug('unack queue is empty')
         else:
             self.logger.debug('unack queue is not empty')
-            #if self.unack_timer.isCancelled():
-            #    self.logger.error('Unack timer not running altough packets in unack queue, state %s' % self.unack_timer.getState())
+            #if self.resend_timer.isCancelled():
+            #    self.logger.error('resend timer not running altough packets in resend queue, state %s' % self.resend_timer.getState())
             #    exit(0)
         self.unack_queue.append(packet)
         self.local_send_window = self.max_local_send_window - self.unack_queue.getSize()
         self.logger.debug('Packet sent reliably, packets in queue: %d resend timer state %s, tlvs in packet %d'\
-            % (self.unack_queue.getSize(), str(self.unack_timer.getState()), len(packet.TLVs)))
+            % (self.unack_queue.getSize(), str(self.resend_timer.getState()), len(packet.TLVs)))
         self.print_resend_timer()
         self.sync.release()
         debug.send_r_process_time += time.time() - start
@@ -283,8 +283,8 @@ class Connection:
             self.logger.debug("RTT set to over 1 second.")
 
     def stop(self):
-        if self.unack_timer and self.unack_timer.isAlive():
-            self.unack_timer.stop()
+        if self.resend_timer and self.resend_timer.isAlive():
+            self.resend_timer.cancel()
             
     def seq_no_plus(self, num):
         # Returns the modulo of the seq no plus num
@@ -295,34 +295,45 @@ class Connection:
         return wrapped_minus(self.seq_no, num, self.max_seq -1)
 
     def reset_resend_timer(self, zzz, packet):
-        self.unack_timer_lock.acquire()
-        if self.unack_timer != None:
+        # Creates a new resend timer or resets the existing timer's expire time.
+        self.resend_timer_lock.acquire()
+        if self.resend_timer != None:
             self.logger.debug('Resetting existing resend timer.')
-            self.unack_timer.reset(zzz, packet)
+            self.resend_timer.reset(zzz, packet)
         else:
             self.logger.debug('Creating resend timer.')
             logger_str = str(self.remote_ip) + ':' + str(self.remote_port)
-            self.unack_timer = Connection.ResendTimer(self, logger_str, self.unack_timer_lock, zzz, packet)
-            self.unack_timer.start()
-        self.unack_timer_lock.release()
+            self.resend_timer = Connection.ResendTimer(self, logger_str, self.resend_timer_lock, zzz, packet)
+            self.resend_timer.start()
+        self.resend_timer_lock.release()
 
     def cancel_resend_timer(self):
-        self.unack_timer_lock.acquire()
-        if self.unack_timer != None:
-            self.unack_timer.cancel()
-            self.unack_timer = None
-        self.unack_timer_lock.release()
+        # Cancels the resend timer
+        self.resend_timer_lock.acquire()
+        if self.resend_timer != None:
+            self.resend_timer.cancel()
+            self.resend_timer = None
+        self.resend_timer_lock.release()
 
     def print_resend_timer(self):
-        self.unack_timer_lock.acquire()
-        if self.unack_timer != None:
-            self.logger.debug(self.unack_timer.str_locked())
+        # Prints resend timer info
+        self.resend_timer_lock.acquire()
+        if self.resend_timer != None:
+            self.logger.debug(self.resend_timer.str_locked())
         else:
             self.logger.debug('No resend timer.')
-        self.unack_timer_lock.release()
+        self.resend_timer_lock.release()
 
     class ResendTimer(Thread):
+        ''''Unfortunately there is no class that would offer timer functionality that could work on per thread basis.
+        Because of this, we are implementing a class that does what we need. Polling in the master thread would have
+        been an alternative, but polling is just too ugly. (Not that this is an especially clean solution either).
+        The timer is handled in the functions of the Connection class.'''
+
+
         class State:
+            # The timer goes to sleep state when started. If the resend time is modified, or the timer is cancelled
+            # during the sleel, it will go to reset or cancelled state respectively.
             sleeping = 0
             reset = 1
             cancelled = 2
@@ -344,6 +355,8 @@ class Connection:
 
         def run(self):
             # Here be dragons...
+            # Sleeps and resends after woken unless cancelled or resetted during sleep.
+            # After waking up, doubles the resend timer and sleeps again.
             while True:
                 self.__sync.acquire()
                 time_to_sleep = self.__when_to_wake - time.time()

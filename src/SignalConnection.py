@@ -18,6 +18,8 @@ class SignalServer(Thread):
     exit_flag = False
     received_packet = None
     fsystem = None
+    polltime = 0.5
+    updatetime = 5.0 # update time. send update messages to all peers.
 
     # TODO Throw error in case bind fails (Might do it already...)
     def __init__(self, fsystem, dataserver, ip = "0.0.0.0", port = 5500, sender_id = random.randint(0, 65535),
@@ -36,7 +38,7 @@ class SignalServer(Thread):
 
         self.sock = LossySocket(socket.AF_INET, socket.SOCK_DGRAM, q = q, p = p)
         self.sock.bind((ip, port))
-        self.sock.settimeout(0.5) # So we can exit and wont block forever in recvfrom
+        self.sock.settimeout(self.polltime) # So we can exit and wont block forever in recvfrom
 
         self.received_packet = InPacket()
         self.connection_list_lock = thread.allocate_lock()
@@ -51,6 +53,9 @@ class SignalServer(Thread):
             except socket.error:
                 errno, errstr = sys.exc_info()[:2]
                 if errno == socket.timeout:
+                    for connection in self.connection_list:
+                    # Check if the connection should send an update message
+                        connection.check_send_update()
                     #self.logger.info("socket timeout")
                     continue
                 else:
@@ -73,7 +78,8 @@ class SignalServer(Thread):
                     remote_session_id = self.received_packet.txlocalID,
                     version = self.received_packet.version,
                     send_ack_no = self.received_packet.sequence,
-                    seq_no = random.randint(0, 65535))
+                    seq_no = random.randint(0, 65535),
+                    updatetime = self.updatetime)
     #def __init__(self, server, remote_ip, remote_port, local_session_id, remote_session_id = 0,
     #        version = 1, send_ack_no = random.randint(0, 65534), seq_no = random.randint(0, 65535)):
                 connection.hello_recv(self.received_packet)
@@ -83,6 +89,9 @@ class SignalServer(Thread):
             elif not found:
                 self.logger.info("Packet does not belong to any connection and not a valid HELLO. Discarding.")
             self.logger.info("done with packet.\n")
+            for connection in self.connection_list:
+                # Check if the connection should send an update message
+                connection.check_send_update()
             self.connection_list_lock.release()
                 
 
@@ -125,13 +134,17 @@ class SignalConnection(Connection):
 
     # TODO check initializations
     def __init__(self, server, remote_ip, remote_port, local_session_id, remote_session_id = 0,
-            version = 1, send_ack_no = random.randint(0, 65534), seq_no = random.randint(0, 65535)):
+            version = 1, send_ack_no = random.randint(0, 65534), seq_no = random.randint(0, 65535),
+            updatetime = 5):
         Connection.__init__(self, sock = server.sock, remote_ip = remote_ip, remote_port = remote_port,
             local_session_id = local_session_id, remote_session_id = remote_session_id,
             version = version, send_ack_no = send_ack_no, seq_no = seq_no, logger_str = "Signal Connection to ")
         self.server = server
         self.logger.info("Initializing signal connection to %s:%i at %s" % (self.remote_ip, self.remote_port, str(time.time())))
         self.state = SignalConnection.State.UNCONNECTED
+
+        self.last_update = time.time() # Marks the time of last sent update request
+        self.updatetime = updatetime
 
     def connect(self):
         #def create_packet(self, version=1, flags=[], senderID=0, txlocalID=0, txremoteID=0,
@@ -267,11 +280,11 @@ class SignalConnection(Connection):
                 elif tlv.split('?')[0] == 'md5sum':
                     md5sum = tlv.split('?')[1]
             # TODO Launch Tomi's code here
-            print '\n'
+            print '* Creating data connection: *'
             print (self.remote_ip, remote_port,
                 local_tx_id, remote_tx_id, self.version, self.server.sender_id,
                 fname, md5sum, fsize)
-            print '\n'
+            print '**'
             self.server.dataserver.add_session(self.remote_ip, remote_port,
                 local_tx_id, remote_tx_id, self.version, self.server.sender_id,
                 fname, md5sum, fsize, True)
@@ -281,6 +294,15 @@ class SignalConnection(Connection):
         if self.state == SignalConnection.State.CONNECTED:
             self.receive_packet_end(packet)
 
+    def check_send_update(self):
+        # Returns False if the connection should be shut down.
+        if self.state != SignalConnection.State.CONNECTED:
+            return True
+        if self.resends > 10:
+            return False
+        if time.time() - self.last_update > self.updatetime:
+            self.send_update('REQUEST')
+        return True
 
     # ocode is either 'REQUEST' or 'RESPONSE'
     def send_update(self, ocode):
@@ -292,6 +314,7 @@ class SignalConnection(Connection):
         self.logger.info('hash: ' + h)
         packet_to_send.append_entry_to_TLVlist('DATA', h)
         if ocode == 'REQUEST':
+            self.last_update = time.time()
             self.send_packet_reliable(packet_to_send)
         else:
             self.send_packet_unreliable(packet_to_send)
@@ -350,11 +373,11 @@ class SignalConnection(Connection):
         self.server.dataserver.add_session(self.remote_ip, remote_data_port,
             local_tx_id, remote_tx_id, self.version, self.server.sender_id,
             fname, '', 0, False)
-        print '\n'
+        print '* Creating data connection: *'
         print (self.remote_ip, remote_data_port,
             local_tx_id, remote_tx_id, self.version, self.server.sender_id,
             fname)
-        print '\n'
+        print '**'
         packet_to_send.create_packet(version=self.version, flags=[], senderID=self.server.sender_id,
             txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
             sequence=self.seq_no, ack=self.send_ack_no, otype='PULL', ocode='RESPONSE')

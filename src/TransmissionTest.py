@@ -3,6 +3,7 @@ from Connection import *
 from PacketManager import *
 
 test_string = "".join(['*' for i in range(1000)])
+stop = False
 
 def main():
 
@@ -25,27 +26,57 @@ def main():
         client(float(sys.argv[2]), float(sys.argv[3]))
 
 class ClientReceiver(Thread):
-    sock = None
-    logger = None
 
     def __init__(self, connection):
         Thread.__init__(self)
         self.logger = logging.getLogger("Client receiver")
         self.connection = connection
+        self.connection.sock.settimeout(0.5) # So we can exit and wont block forever in recvfrom
 
     def run(self):
         received_packet = InPacket()
-        while True:
-            data, addr = self.connection.sock.recvfrom(2000)
-            self.logger.debug("received message")
+        while stop == False:
+            try:
+                data, addr = self.connection.sock.recvfrom(2000)
+            except:
+                continue
             received_packet.packetize_raw(data)
             received_packet.receive_time = time.time()
             #received_packet.print_packet()
             self.connection.receive_packet(received_packet)
+        self.connection.stop()
+        self.logger.info("receiver thread shutting down")
+        
+class ClientSender(Thread):
 
+    def __init__(self, connection, sender_id):
+        Thread.__init__(self)
+        self.logger = logging.getLogger("Client sender")
+        self.connection = connection
+        self.sender_id = sender_id
+
+    def run(self):
+        data = 10
+        str_data = "%s%d" % (test_string, data)
+        while stop == False:
+            packet_to_send = OutPacket()
+            packet_to_send.create_packet(version=self.connection.version, flags=[], senderID=self.sender_id,
+                txlocalID=self.connection.local_session_id, txremoteID=self.connection.remote_session_id,
+                sequence=self.connection.seq_no, ack=self.connection.send_ack_no, otype='UPDATE', ocode='REQUEST')
+            packet_to_send.append_entry_to_TLVlist('DATA', str_data)
+
+            if self.connection.send_packet_reliable(packet_to_send) == False:
+                #self.logger.info("send failed. sleeping")
+                time.sleep(0.1)
+            else:
+                data = (data + 1) % 100000
+                str_data = "%s%d" % (test_string, data)
+        self.connection.stop()
+        self.logger.info("sender thread shutting down")
 
 def client(p, q):
     sender_id = 2
+    global stop
     logger = logging.getLogger("Test client")
 
     sock = LossySocket(socket.AF_INET, socket.SOCK_DGRAM, q = q, p = p)
@@ -60,22 +91,15 @@ def client(p, q):
     
     receiver = ClientReceiver(connection)
     receiver.start()
+    sender = ClientSender(connection, sender_id)
+    sender.start()
     
-    data = 10
-    str_data = "%s%d" % (test_string, data)
-    while True:
-        packet_to_send = OutPacket()
-        packet_to_send.create_packet(version=connection.version, flags=[], senderID=sender_id,
-            txlocalID=connection.local_session_id, txremoteID=connection.remote_session_id,
-            sequence=connection.seq_no, ack=connection.send_ack_no, otype='UPDATE', ocode='REQUEST')
-        packet_to_send.append_entry_to_TLVlist('DATA', str_data)
-
-        if connection.send_packet_reliable(packet_to_send) == False:
-            logger.info("send failed. sleeping")
+    try:
+        while True:
             time.sleep(0.1)
-        else:
-            data = (data + 1) % 100000
-            str_data = "%s%d" % (test_string, data)
+    except KeyboardInterrupt:
+        logger.info('CTRL+C received, killing connection...')
+        stop = True
 
 
 def server(p, q):
@@ -97,23 +121,29 @@ def server(p, q):
     
     exp_data = 10
 
-    while True:
-        data, addr = sock.recvfrom(2000)
-        logger.debug("received message")
-        received_packet.packetize_raw(data)
-        received_packet.receive_time = time.time()
+    try:
+        while True:
+            data, addr = sock.recvfrom(2000)
+            logger.debug("received message")
+            received_packet.packetize_raw(data)
+            received_packet.receive_time = time.time()
         #received_packet.print_packet()
-        if connection.receive_packet(received_packet):
-            received_data = int(received_packet.get_TLVlist(tlvtype = 'DATA')[0][1000:])
-            if exp_data != received_data:
-                logger.error("invalid data: %d, expected: %d" % (received_data, exp_data))
-                exit(0)
-            exp_data = (exp_data + 1) % 100000
+            if connection.receive_packet(received_packet):
+                print 'testing %d' % exp_data
+                received_data = int(received_packet.get_TLVlist(tlvtype = 'DATA')[0][1000:])
+                if exp_data != received_data:
+                    logger.error("invalid data: %d, expected: %d" % (received_data, exp_data))
+                    exit(0)
+                exp_data = (exp_data + 1) % 100000
 
-        packet_to_send.create_packet(version=connection.version, flags=[], senderID=sender_id,
-            txlocalID=connection.local_session_id, txremoteID=connection.remote_session_id,
-            sequence=connection.seq_no, ack=connection.send_ack_no, otype='UPDATE', ocode='REQUEST')
+            packet_to_send.create_packet(version=connection.version, flags=[], senderID=sender_id,
+                txlocalID=connection.local_session_id, txremoteID=connection.remote_session_id,
+                sequence=connection.seq_no, ack=connection.send_ack_no, otype='UPDATE', ocode='REQUEST')
 
-        connection.send_packet_unreliable(packet_to_send)
+            connection.send_packet_unreliable(packet_to_send)
+    except KeyboardInterrupt:
+        logger.info('CTRL+C received, killing connection...')
+        connection.stop()
+        stop = True
 
 main()

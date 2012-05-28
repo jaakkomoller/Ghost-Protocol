@@ -44,7 +44,7 @@ class ClientReceiver(Thread):
             received_packet.packetize_raw(data)
             received_packet.receive_time = time.time()
             #received_packet.print_packet()
-            self.connection.receive_packet(received_packet)
+            self.connection.receive_packet_start(received_packet)
         self.connection.stop()
         self.logger.info("receiver thread shutting down")
         
@@ -130,7 +130,7 @@ def server(p, q):
             received_packet.packetize_raw(data)
             received_packet.receive_time = time.time()
         #received_packet.print_packet()
-            if connection.receive_packet(received_packet):
+            if connection.receive_packet_start(received_packet):
                 #print 'testing %d' % exp_data
                 d = received_packet.get_TLVlist(tlvtype = 'DATA')[0][1000:]
                 received_data = int(d)

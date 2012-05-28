@@ -48,12 +48,6 @@ class debug:
 # It provides flow control, security, authentication, and/or congestion control if needed.
 class Connection:
 
-    class State:
-        UNCONNECTED = 0
-        CONNECTED = 1
-        HELLO_SENT = 2
-        HELLO_RECVD = 3
-
     # TODO: move session and user id into SignalConnection
     max_seq = int("FFFF", 16)
     max_session_id = int("FF", 16)
@@ -81,7 +75,6 @@ class Connection:
         self.remote_send_window = remote_send_window
         self.local_session_id = local_session_id
         self.remote_session_id = remote_session_id
-        self.state = Connection.State.UNCONNECTED
         self.rto_buffer = RingBuffer(self.rto_mean_rtts)
         self.remote_send_time = 0.0
         self.remote_send_time_receive_time = 0.0
@@ -100,7 +93,7 @@ class Connection:
 
         self.resend_send_ack = False
 
-    def receive_packet(self, packet):
+    def receive_packet_start(self, packet):
         start = time.time()
         self.sync.acquire()
         self.resends = 0
@@ -113,12 +106,12 @@ class Connection:
                 packet.sequence == wrapped_plus(self.send_ack_no, 1, Connection.max_seq):
                 # Max seq reserved for unreliable transfer.
             # TODO We should not require packets to arrive in order.
-            self.logger.warning("Expecting %d, got %d" % (wrapped_plus(self.send_ack_no, 1, Connection.max_seq),
+            self.logger.debug("Expecting %d, got %d" % (wrapped_plus(self.send_ack_no, 1, Connection.max_seq),
                 packet.sequence))
             self.send_ack_no = packet.sequence
             ret = True
         else:
-            self.logger.warning("Expecting %d, got %d" % (wrapped_plus(self.send_ack_no, 1, Connection.max_seq),
+            self.logger.debug("Expecting %d, got %d" % (wrapped_plus(self.send_ack_no, 1, Connection.max_seq),
                 packet.sequence))
             ret = False
 
@@ -192,6 +185,15 @@ class Connection:
         debug.receive_process_time += time.time() - start
         return ret
         
+    def receive_packet_end(self, packet):
+        if self.resend_send_ack == True:
+            # We got new seq but did not ack it
+            self.logger.info('Packet processed. Client waiting for ACK, so acking.')
+            packet_to_send = OutPacket()
+            packet_to_send.create_packet(version=self.version, flags=[], senderID=self.__server.sender_id,
+                txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
+                sequence=self.seq_no, ack=self.send_ack_no, otype='UPDATE', ocode='RESPONSE')
+            self.send_packet_unreliable(packet_to_send)
     
     def send_packet_reliable(self, packet):
         start = time.time()
@@ -206,7 +208,7 @@ class Connection:
         self.__send_out(packet)
 
         self.seq_no = self.seq_no_plus(1)
-        self.logger.warning('seq no set to %d' % self.seq_no)
+        self.logger.debug('seq no set to %d' % self.seq_no)
         if self.unack_queue.getSize() == 0:
             self.reset_resend_timer(self.rto, packet)
             self.logger.debug('unack queue is empty')
@@ -591,7 +593,7 @@ class LossySocket(object):
             
 
 def wrapped_plus(num1, num2, modulo):
-    print modulo
+    #print modulo
     return (num1 + num2) % modulo
 
 def wrapped_minus(num1, num2, modulo):

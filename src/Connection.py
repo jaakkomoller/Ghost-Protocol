@@ -190,7 +190,7 @@ class Connection:
             # We got new seq but did not ack it
             self.logger.info('Packet processed. Client waiting for ACK, so acking.')
             packet_to_send = OutPacket()
-            packet_to_send.create_packet(version=self.version, flags=[], senderID=self.__server.sender_id,
+            packet_to_send.create_packet(version=self.version, flags=[], senderID=self.server.sender_id,
                 txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
                 sequence=self.seq_no, ack=self.send_ack_no, otype='UPDATE', ocode='RESPONSE')
             self.send_packet_unreliable(packet_to_send)

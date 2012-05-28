@@ -5,6 +5,7 @@ from PacketManager import *
 from Connection import *
 from Configuration import *
 from FileSystem import *
+from DataConnection import *
 # TODO remove Configuration, sys and signal imports
 
 class SignalServer(Thread):
@@ -19,13 +20,15 @@ class SignalServer(Thread):
     fsystem = None
 
     # TODO Throw error in case bind fails (Might do it already...)
-    def __init__(self, fsystem, ip = "0.0.0.0", port = 5500, sender_id = random.randint(0, 65535), q = 1.0, p = 0.0):
+    def __init__(self, fsystem, dataserver, ip = "0.0.0.0", port = 5500, sender_id = random.randint(0, 65535),
+            q = 1.0, p = 0.0):
         Thread.__init__(self)
 
         # TODO Think trough how the program should exit
         #signal.signal(signal.SIGINT, self.signal_handler)
         
         self.fsystem = fsystem
+        self.dataserver = dataserver
         self.sender_id = sender_id
 
         self.logger = logging.getLogger("Signal server")
@@ -126,7 +129,7 @@ class SignalConnection(Connection):
         Connection.__init__(self, sock = server.sock, remote_ip = remote_ip, remote_port = remote_port,
             local_session_id = local_session_id, remote_session_id = remote_session_id,
             version = version, send_ack_no = send_ack_no, seq_no = seq_no, logger_str = "Signal Connection to ")
-        self.__server = server
+        self.server = server
         self.logger.info("Initializing signal connection to %s:%i at %s" % (self.remote_ip, self.remote_port, str(time.time())))
         self.state = SignalConnection.State.UNCONNECTED
 
@@ -135,7 +138,7 @@ class SignalConnection(Connection):
 #     sequence=0, ack=0, otype=0, ocode=0, TLVlist=None, rawdata=None):
         # Packet manager should be able to build hello packets (i.e. set remote session id)
         packet_to_send = OutPacket()
-        packet_to_send.create_packet(version=self.version, flags=[], senderID=self.__server.sender_id,
+        packet_to_send.create_packet(version=self.version, flags=[], senderID=self.server.sender_id,
             txlocalID=self.local_session_id, txremoteID=0, sequence=self.seq_no, otype='HELLO',
             ocode='REQUEST')
         self.send_packet_reliable(packet_to_send)
@@ -146,7 +149,7 @@ class SignalConnection(Connection):
         self.receive_packet_start(packet)
         packet_to_send = OutPacket()
         self.send_ack_no = packet.sequence
-        packet_to_send.create_packet(version=self.version, flags=[], senderID=self.__server.sender_id,
+        packet_to_send.create_packet(version=self.version, flags=[], senderID=self.server.sender_id,
             txlocalID=self.local_session_id, txremoteID=self.remote_session_id, sequence=self.seq_no,
             ack=self.send_ack_no, otype='HELLO', ocode='RESPONSE')  
         self.send_packet_unreliable(packet_to_send, syn_ack = True)
@@ -162,7 +165,7 @@ class SignalConnection(Connection):
             self.remote_session_id = packet.txlocalID
             self.send_ack_no = packet.sequence
             packet_to_send = OutPacket()
-            packet_to_send.create_packet(version=self.version, flags=[], senderID=self.__server.sender_id,
+            packet_to_send.create_packet(version=self.version, flags=[], senderID=self.server.sender_id,
                 txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
                 sequence=self.seq_no, ack=self.send_ack_no, otype='HELLO', ocode='RESPONSE')  
             # TODO set remote sender id and ack no
@@ -195,7 +198,7 @@ class SignalConnection(Connection):
                 if entry[0] == TLVTYPE['DATA']:
                     self.logger.info('hash: %s' % entry[2])
                     got_hash = True
-                    if self.__server.fsystem.get_hash_manifest() != entry[2]:
+                    if self.server.fsystem.get_hash_manifest() != entry[2]:
                         self.logger.info('hash files differ')
                         self.send_list_request()
             if not got_hash:
@@ -208,19 +211,20 @@ class SignalConnection(Connection):
                 self.state == SignalConnection.State.CONNECTED:
             self.logger.info('LIST RESPONSE received')
             tlvlist = packet.get_TLVlist(tlvtype='DATA')
-            manifest = self.__server.fsystem.get_diff_manifest_remote(packet.get_TLVlist(tlvtype='DATA'))
+            manifest = self.server.fsystem.get_diff_manifest_remote(packet.get_TLVlist(tlvtype='DATA'))
             self.logger.info('list response received. tlvlist:')
             for entry in tlvlist:
                 self.logger.info(entry)
             self.logger.info('diff:')
             for entry in manifest:
                 self.logger.info(entry)
-                if entry.split('?')[0] == 'FIL':
-                    self.send_fetch_file(entry.split('?')[1])
+                splitted = entry.split('?')
+                if splitted[0] == 'FIL':
+                    self.send_fetch_file(splitted[1], int(splitted[2]), splitted[4])
         elif packet.otype == OPERATION['PULL'] and packet.ocode == CODE['REQUEST'] and \
                 self.state == SignalConnection.State.CONNECTED:
             self.logger.info('PULL REQUEST received')
-            tlvlist = packet.get_TLVlist(tlvtype='DATA')
+            tlvlist = packet.get_TLVlist(tlvtype='DATACONTROL')
             if len(tlvlist) > 0:
                 filename = tlvlist[0]
                 tlvlist = packet.get_TLVlist(tlvtype='DATACONTROL')
@@ -232,8 +236,14 @@ class SignalConnection(Connection):
                         remote_tx_id = int(tlv.split('?')[1])
                     elif tlv.split('?')[0] == 'local_port':
                         remote_port = int(tlv.split('?')[1])
+                    elif tlv.split('?')[0] == 'filesize':
+                        filesize = int(tlv.split('?')[1])
+                    elif tlv.split('?')[0] == 'filename':
+                        filename = tlv.split('?')[1]
+                    elif tlv.split('?')[0] == 'md5sum':
+                        md5sum = tlv.split('?')[1]
                 if remote_port >= 0 and remote_tx_id >= 0:
-                    self.send_fetch_file_response(remote_tx_id, remote_port)
+                    self.send_fetch_file_response(remote_tx_id, remote_port, filename, filesize, md5sum)
         elif packet.otype == OPERATION['PULL'] and packet.ocode == CODE['RESPONSE'] and \
                 self.state == SignalConnection.State.CONNECTED:
             self.logger.info('PULL RESPONSE received')
@@ -246,11 +256,25 @@ class SignalConnection(Connection):
                     remote_tx_id = int(tlv.split('?')[1])
                 elif tlv.split('?')[0] == 'local_port':
                     remote_port = int(tlv.split('?')[1])
+                elif tlv.split('?')[0] == 'remote_tx_id':
+                    local_tx_id = int(tlv.split('?')[1])
+                elif tlv.split('?')[0] == 'remote_port':
+                    local_port = int(tlv.split('?')[1])
+                elif tlv.split('?')[0] == 'filesize':
+                    fsize = int(tlv.split('?')[1])
+                elif tlv.split('?')[0] == 'filename':
+                    fname = tlv.split('?')[1]
+                elif tlv.split('?')[0] == 'md5sum':
+                    md5sum = tlv.split('?')[1]
             # TODO Launch Tomi's code here
-            tlv_string = ""
-            for tlv in packet.TLVs:
-                tlv_string += tlv[2] + ","
-            self.logger.info('tlvs: %s' % tlv_string)
+            print '\n'
+            print (self.remote_ip, remote_port,
+                local_tx_id, remote_tx_id, self.version, self.server.sender_id,
+                fname, md5sum, fsize)
+            print '\n'
+            self.server.dataserver.add_session(self.remote_ip, remote_port,
+                local_tx_id, remote_tx_id, self.version, self.server.sender_id,
+                fname, md5sum, fsize, True)
         else:
             self.logger.error('invalid packet or state')
     
@@ -261,21 +285,21 @@ class SignalConnection(Connection):
     # ocode is either 'REQUEST' or 'RESPONSE'
     def send_update(self, ocode):
         packet_to_send = OutPacket()
-        packet_to_send.create_packet(version=self.version, flags=[], senderID=self.__server.sender_id,
+        packet_to_send.create_packet(version=self.version, flags=[], senderID=self.server.sender_id,
             txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
             sequence=self.seq_no, ack=self.send_ack_no, otype='UPDATE', ocode=ocode)  
-        h = self.__server.fsystem.get_hash_manifest()
-        print h
+        h = self.server.fsystem.get_hash_manifest()
+        self.logger.info('hash: ' + h)
         packet_to_send.append_entry_to_TLVlist('DATA', h)
         if ocode == 'REQUEST':
             self.send_packet_reliable(packet_to_send)
         else:
             self.send_packet_unreliable(packet_to_send)
-        self.logger.info('update sent, hash %s' % self.__server.fsystem.get_hash_manifest())
+        self.logger.info('update sent, hash %s' % self.server.fsystem.get_hash_manifest())
     
     def send_list_request(self):
         packet_to_send = OutPacket()
-        packet_to_send.create_packet(version=self.version, flags=[], senderID=self.__server.sender_id,
+        packet_to_send.create_packet(version=self.version, flags=[], senderID=self.server.sender_id,
             txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
             sequence=self.seq_no, ack=self.send_ack_no, otype='LIST', ocode='REQUEST')  
         self.send_packet_reliable(packet_to_send)
@@ -283,49 +307,64 @@ class SignalConnection(Connection):
     
     def send_list_response(self):
         # TODO Too many files might make the packet too large
-        local_manifest = self.__server.fsystem.get_local_manifest()
+        local_manifest = self.server.fsystem.get_local_manifest()
+        # TODO Remove when fixed in FileSystem
+        local_manifest = [fname for fname in local_manifest if 'private' not in fname]
         packet_to_send = OutPacket()
-        packet_to_send.create_packet(version=self.version, flags=[], senderID=self.__server.sender_id,
+        packet_to_send.create_packet(version=self.version, flags=[], senderID=self.server.sender_id,
             txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
             sequence=self.seq_no, ack=self.send_ack_no, otype='LIST', ocode='RESPONSE')  
         packet_to_send.append_list_to_TLVlist('DATA', local_manifest)
         self.send_packet_unreliable(packet_to_send)
         self.logger.info('List response sent. local manifest:')
-        for entry in self.__server.fsystem.get_local_manifest():
+        for entry in self.server.fsystem.get_local_manifest():
             self.logger.debug(entry)
 
-    def send_fetch_file(self, filename):
+    def send_fetch_file(self, filename, fsize, md5sum):
         # TODO Get port and tx id from Tomi's code
         # TODO Lock the fetched file somehow
         # TODO implement state change with cookie
+        local_tx_id = self.server.get_new_session_id(random.randint(0, 65535))
         packet_to_send = OutPacket()
-        local_tx_id = random.randint(0, 65535)
-        local_data_port = random.randint(1500, 3000)
-        packet_to_send.create_packet(version=self.version, flags=[], senderID=self.__server.sender_id,
+        local_data_port = self.server.dataserver.get_port()
+        packet_to_send.create_packet(version=self.version, flags=[], senderID=self.server.sender_id,
             txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
             sequence=self.seq_no, ack=self.send_ack_no, otype='PULL', ocode='REQUEST')
-        packet_to_send.append_entry_to_TLVlist('DATA', filename)
+        packet_to_send.append_entry_to_TLVlist('DATACONTROL', 'filename?%s' % filename)
+        packet_to_send.append_entry_to_TLVlist('DATACONTROL', 'filesize?%d' % fsize)
         packet_to_send.append_entry_to_TLVlist('DATACONTROL', 'local_tx_id?%d' % local_tx_id)
         packet_to_send.append_entry_to_TLVlist('DATACONTROL', 'local_port?%d' % local_data_port)
+        packet_to_send.append_entry_to_TLVlist('DATACONTROL', 'md5sum?%s' % md5sum)
         tlv_string = ""
         for tlv in packet_to_send.TLVs:
             tlv_string += tlv[2] + ","
         self.send_packet_reliable(packet_to_send)
         self.logger.info('pull request sent, tlvs: %s' % tlv_string)
 
-    def send_fetch_file_response(self, remote_tx_id, remote_data_port):
+    def send_fetch_file_response(self, remote_tx_id, remote_data_port, fname, fsize, md5sum):
         # TODO get these from Tomis code.
         # TODO Lock the fetched file somehow
-        local_tx_id = random.randint(0, 65535)
-        local_data_port = random.randint(1500, 3000)
+        local_tx_id = self.server.get_new_session_id(random.randint(0, 65535))
+        local_data_port = self.server.dataserver.get_port()
         packet_to_send = OutPacket()
-        packet_to_send.create_packet(version=self.version, flags=[], senderID=self.__server.sender_id,
+        self.server.dataserver.add_session(self.remote_ip, remote_data_port,
+            local_tx_id, remote_tx_id, self.version, self.server.sender_id,
+            fname, '', 0, False)
+        print '\n'
+        print (self.remote_ip, remote_data_port,
+            local_tx_id, remote_tx_id, self.version, self.server.sender_id,
+            fname)
+        print '\n'
+        packet_to_send.create_packet(version=self.version, flags=[], senderID=self.server.sender_id,
             txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
             sequence=self.seq_no, ack=self.send_ack_no, otype='PULL', ocode='RESPONSE')
         packet_to_send.append_entry_to_TLVlist('DATACONTROL', 'remote_tx_id?%d' % remote_tx_id)
         packet_to_send.append_entry_to_TLVlist('DATACONTROL', 'remote_port?%d' % remote_data_port)
         packet_to_send.append_entry_to_TLVlist('DATACONTROL', 'local_tx_id?%d' % local_tx_id)
         packet_to_send.append_entry_to_TLVlist('DATACONTROL', 'local_port?%d' % local_data_port)
+        packet_to_send.append_entry_to_TLVlist('DATACONTROL', 'filename?%s' % fname)
+        packet_to_send.append_entry_to_TLVlist('DATACONTROL', 'filesize?%d' % fsize)
+        packet_to_send.append_entry_to_TLVlist('DATACONTROL', 'md5sum?%s' % md5sum)
         tlv_string = ""
         for tlv in packet_to_send.TLVs:
             tlv_string += tlv[2] + ","
@@ -367,7 +406,11 @@ def main():
     # Sleep a while, so we have an up-to-date manifest TODO Not sure manifest is done.
     time.sleep(2)
 
-    server = SignalServer(fsystem = fsystem, port = int(port), sender_id = random.randint(0, 65535),
+    dataserver = DataServer(fsystem.root_path,'0.0.0.0',int(port)+1)
+    dataserver.start()
+    dataserver.add_port()
+    server = SignalServer(fsystem = fsystem, dataserver = dataserver, port = int(port),
+        sender_id = random.randint(0, 65535),
         q = q_prob, p = p_prob)
 
     server.init_connections(peers)

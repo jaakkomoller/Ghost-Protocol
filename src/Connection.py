@@ -60,11 +60,14 @@ class Connection:
     max_user_id = int("FF", 16)
     max_resend_time = 10.0    # Max resend time in secs
     init_rtt = 1.0 # Initial RTT in secs
+    rto_mean_rtts = 5 # RTO is a mean of these * rto_times_rtt
+    rto_times_rtt = 3 # RT= is rto_mean_rtts * rto_times_rtt
 
     # TODO check initializations
     # TODO change server to jsut sock for Connection object
     def __init__(self, sock, remote_ip, remote_port, local_session_id, remote_session_id = 0,
-            version = 1, send_ack_no = random.randint(0, 65534), seq_no = random.randint(0, 65534),
+            version = 1, send_ack_no = random.randint(0, max_seq-1),
+            seq_no = random.randint(0, max_seq-1),
             rtt = init_rtt, logger_str = "Connection to", max_local_send_window = 10, remote_send_window = 10):
         self.sock = sock     # Pointer to server socket
         self.version = version
@@ -79,7 +82,7 @@ class Connection:
         self.local_session_id = local_session_id
         self.remote_session_id = remote_session_id
         self.state = Connection.State.UNCONNECTED
-        self.__setRtt__(rtt)
+        self.rto_buffer = RingBuffer(self.rto_mean_rtts)
         self.remote_send_time = 0.0
         self.remote_send_time_receive_time = 0.0
         self.unack_queue = RingBuffer(10)    # Queue of sent, but unacked packets
@@ -90,6 +93,8 @@ class Connection:
         self.logger = logging.getLogger(logger_str)
         self.logger.info("Initializing connection to %s:%i at %s" % (self.remote_ip, self.remote_port, str(time.time())))
 
+        self.__setRtt__(rtt)
+        self.rto = self.rtt * self.rto_times_rtt
         self.resend_timer = None
         self.resend_timer_lock = thread.allocate_lock() # Synchronization for resend timer handling
 
@@ -100,17 +105,21 @@ class Connection:
         self.sync.acquire()
         self.resends = 0
 
-        if packet.sequence <= self.send_ack_no and packet.sequence != Connection.max_seq:
+        if not wrapped_is_greater(packet.sequence, self.send_ack_no, self.max_seq) \
+                and packet.sequence != Connection.max_seq:
             self.resend_send_ack = True
 
-        self.logger.debug("Expecting %d, got %d" % (self.send_ack_no+1, packet.sequence))
         if packet.sequence != Connection.max_seq and \
-                packet.sequence == (self.send_ack_no+1 % Connection.max_seq): # Max seq reserved for unreliable transfer.
+                packet.sequence == wrapped_plus(self.send_ack_no, 1, Connection.max_seq):
+                # Max seq reserved for unreliable transfer.
             # TODO We should not require packets to arrive in order.
+            self.logger.warning("Expecting %d, got %d" % (wrapped_plus(self.send_ack_no, 1, Connection.max_seq),
+                packet.sequence))
             self.send_ack_no = packet.sequence
             ret = True
         else:
-            self.logger.debug("Did not get what expected")
+            self.logger.warning("Expecting %d, got %d" % (wrapped_plus(self.send_ack_no, 1, Connection.max_seq),
+                packet.sequence))
             ret = False
 
         #print packet.sequence
@@ -123,7 +132,7 @@ class Connection:
             
 
         # Read control data
-        '''for item in control_tlvs:
+        for item in control_tlvs:
             t = struct.unpack('i', item[:4])[0]
             if t == TXCONTROLTYPE['SENDWIN']:
                 # Send window
@@ -131,18 +140,17 @@ class Connection:
                 self.logger.debug("remote send window updated to: %d" % self.remote_send_window)
             elif t == TXCONTROLTYPE['SENDTIME']:
                 # Remote send time
-                self.remote_send_time = struct.unpack('if', item)[1]
+                self.remote_send_time = struct.unpack('id', item)[1]
                 self.remote_send_time_receive_time = time.time()
                 self.logger.debug("remote send time set to: %f" % self.remote_send_time)
             elif t == TXCONTROLTYPE['OSENDTIME']:
                 # Local send time and remote processing time
-                i, loc_s_time, pros_time = struct.unpack('iff', item)
+                i, loc_s_time, pros_time = struct.unpack('idd', item)
                 self.__setRtt__(time.time() - loc_s_time - pros_time)
-                self.logger.debug("rtt set to: %f" % self.rtt)
+                self.logger.debug("rtt set to: %f, loc %f, pros %f" % (self.rtt, loc_s_time, pros_time))
             else:
                 self.logger.error("Invalid control message: %i" % t)
-        '''
-
+        
 
         self.logger.debug("ack no: %d, packets in unack queue before packet: %d, seq nos: %s" % \
             (self.recv_ack_no, self.unack_queue.getSize(), [unack_packet.sequence for unack_packet in \
@@ -158,9 +166,7 @@ class Connection:
         for i in range(len(unack_packets)):
         #for sent_packet in self.unack_queue.get():
             sent_packet = unack_packets[i]
-            if sent_packet != None and ((self.recv_ack_no >= sent_packet.sequence) or \
-                    (sent_packet.sequence >= Connection.max_seq -1000\
-                    and 1000 > self.recv_ack_no)):
+            if sent_packet != None and not self.recv_ack_no_is_smaller(sent_packet.sequence):
                 self.logger.debug("removing seq %d" % sent_packet.sequence)
                 unack_packets[i] = None
 
@@ -178,9 +184,9 @@ class Connection:
         if not oldest:
             self.cancel_resend_timer()
         elif oldest != self.resend_timer.getPacket():
-            self.logger.debug("Setting resend timer to %f" % (3 * self.rtt))
+            self.logger.debug("Setting resend timer to %f" % self.rto)
             # TODO Set timer from the current time
-            self.reset_resend_timer(3*self.rtt, oldest) 
+            self.reset_resend_timer(self.rto, oldest) 
             
         self.sync.release()
         debug.receive_process_time += time.time() - start
@@ -200,8 +206,9 @@ class Connection:
         self.__send_out(packet)
 
         self.seq_no = self.seq_no_plus(1)
+        self.logger.warning('seq no set to %d' % self.seq_no)
         if self.unack_queue.getSize() == 0:
-            self.reset_resend_timer(3*self.rtt, packet)
+            self.reset_resend_timer(self.rto, packet)
             self.logger.debug('unack queue is empty')
         else:
             self.logger.debug('unack queue is not empty')
@@ -244,19 +251,20 @@ class Connection:
         packet.purge_tlvs(ttype = 'TXCONTROL')
         
         # Include send time for RTT measurement
-        #packet.append_entry_to_TLVlist('TXCONTROL', struct.pack('if', TXCONTROLTYPE['SENDTIME'], time.time()))
+        s_time = time.time()
+        #print s_time
+        packet.append_entry_to_TLVlist('TXCONTROL', struct.pack('id', TXCONTROLTYPE['SENDTIME'], s_time))
 
         # Include send window for window management
-        #packet.append_entry_to_TLVlist('TXCONTROL', struct.pack('ii', TXCONTROLTYPE['SENDWIN'], \
-        #    self.local_send_window))
+        packet.append_entry_to_TLVlist('TXCONTROL', struct.pack('ii', TXCONTROLTYPE['SENDWIN'], \
+            self.local_send_window))
         
         # Echo send time for RTT measurement
-        '''if self.remote_send_time != 0.0:
-            packet.append_entry_to_TLVlist('TXCONTROL', struct.pack('iff', TXCONTROLTYPE['OSENDTIME'], \
+        if self.remote_send_time != 0.0:
+            packet.append_entry_to_TLVlist('TXCONTROL', struct.pack('idd', TXCONTROLTYPE['OSENDTIME'], \
                 self.remote_send_time, time.time() - self.remote_send_time_receive_time))
             self.remote_send_time = 0.0
             self.remote_send_time_receive_time = 0.0
-        '''
 
         self.logger.debug('sending: \n%s' % str(packet))
         
@@ -271,15 +279,19 @@ class Connection:
             return
         
         for packet in self.unack_queue.get():
-            self.logger.warning('Resending %d' % packet.sequence)
-            self.__send_out(packet, resend = True)
-            packet.resends += 1
+            if packet != None:
+                self.logger.debug('Resending %d' % packet.sequence)
+                self.__send_out(packet, resend = True)
+                packet.resends += 1
+                self.logger.debug('Resend done, resends %d, tlvs in packet %d' % (self.resends, len(packet.TLVs)))
         self.resends += 1
-        self.logger.debug('Resend done, resends %d, tlvs in packet %d' % (self.resends, len(packet.TLVs)))
 
     def __setRtt__(self, rtt):
         if rtt >= 0:
+            self.rto_buffer.append(rtt)
             self.rtt = rtt
+            self.rto = self.rto_times_rtt * sum(self.rto_buffer.get_no_nones()) / len(self.rto_buffer.get_no_nones())
+            self.logger.debug('rto set to %f' % self.rto)
         else:
             self.logger.debug('Invalid RTT: %f. Setting to init RTT.' % rtt)
             self.rtt = Connection.init_rtt
@@ -294,20 +306,28 @@ class Connection:
             
     def seq_no_plus(self, num):
         # Returns the modulo of the seq no plus num
-        return wrapped_plus(self.seq_no, num, self.max_seq -1)
+        return wrapped_plus(self.seq_no, num, self.max_seq)
 
     def seq_no_minus(self, num):
         # Returns the modulo of the seq no minus num
-        return wrapped_minus(self.seq_no, num, self.max_seq -1)
+        return wrapped_minus(self.seq_no, num, self.max_seq)
+
+    def seq_no_is_greater(self, num):
+        # Returns the modulo of the seq no minus num
+        return wrapped_is_greater(self.seq_no, num, self.max_seq)
+        
+    def recv_ack_no_is_smaller(self, num):
+        # Returns the modulo of the seq no minus num
+        return wrapped_is_smaller(self.recv_ack_no, num, self.max_seq)
 
     def reset_resend_timer(self, zzz, packet):
         # Creates a new resend timer or resets the existing timer's expire time.
         self.resend_timer_lock.acquire()
         if self.resend_timer != None:
-            self.logger.debug('Resetting existing resend timer.')
+            self.logger.debug('Resetting existing resend timer to %f.' % zzz)
             self.resend_timer.reset(zzz, packet)
         else:
-            self.logger.debug('Creating resend timer.')
+            self.logger.debug('Creating resend timer to %f.' % zzz)
             logger_str = str(self.remote_ip) + ':' + str(self.remote_port)
             self.resend_timer = Connection.ResendTimer(self, logger_str, self.resend_timer_lock, zzz, packet)
             self.resend_timer.start()
@@ -351,13 +371,14 @@ class Connection:
             self.__state = Connection.ResendTimer.State.sleeping
 
             self.__waiting_for_packet = packet
-            self.setZzz(zzz)
-            self.__when_to_wake = time.time() + self.__zzz
 
             self.__sync = sync
 
             self.logger = logging.getLogger(logger_str + ' resend_timer')
             self.logger.debug("Resend timer created.")
+
+            self.setZzz(zzz)
+            self.__when_to_wake = time.time() + self.__zzz
 
         def run(self):
             # Here be dragons...
@@ -466,6 +487,9 @@ class RingBuffer:
     def get(self):
         return self.data
 
+    def get_no_nones(self):
+        return [d for d in self.data if d != None]
+
     def get_oldest(self):
         for element in self.data:
             if element != None:
@@ -567,7 +591,23 @@ class LossySocket(object):
             
 
 def wrapped_plus(num1, num2, modulo):
+    print modulo
     return (num1 + num2) % modulo
 
 def wrapped_minus(num1, num2, modulo):
     return (modulo + num1 - num2) % modulo
+
+def wrapped_is_greater(num1, num2, modulo):
+    if num1 < 100:
+        num1 += modulo
+    if num2 < 100:
+        num2 += modulo
+    return num1 > num2
+    
+def wrapped_is_smaller(num1, num2, modulo):
+    if num1 < 100:
+        num1 += modulo
+    if num2 < 100:
+        num2 += modulo
+    return num1 < num2
+

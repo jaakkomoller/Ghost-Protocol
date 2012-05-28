@@ -183,8 +183,8 @@ class DataSession():
 		self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 	def initialize_transfer(self): 
-		max = self.get_chunk_count()+1
-		for x in range(1, max):
+		max = self.get_chunk_count()
+		for x in range(1, max+1):
 			self.chunks_to_receive.append(x)
 	
 	def transfer_status(self):
@@ -251,8 +251,7 @@ class DataSession():
 
 		elif packet.otype == OPERATION['DATA'] and packet.ocode == CODE['RESPONSE']:	
 
-			#packet.print_packet()
-			print("response received")			
+#			print("response received")			
 	
 			tlvlist = packet.get_TLVlist('DATA') # actual data
                         #print(tlvlist[0])
@@ -262,7 +261,7 @@ class DataSession():
 			tlvlist2 = packet.get_TLVlist('DATACONTROL')
 
                         if tlvlist2[0]==self.get_md5sum(tlvlist[0]): #md5sum is ok
-				print("md5sum matched")
+				print("md5sum matched, seqno:"+str(packet.get_sequence()))
 				self.chunks_to_receive.remove(packet.get_sequence())
 				#TODO: check if chunk is already received and then ignore it
 				if self.failed_chunks.get(packet.get_sequence())==None:
@@ -365,6 +364,7 @@ class DataSession():
 			packet_to_send.append_entry_to_TLVlist('DATACONTROL',self.get_md5sum(chunk))
 
 			self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
+			time.sleep(0.01)
 	
 	def ensure_folder_structure(self,file_path):
     		d = os.path.dirname(self.folder+"/"+file_path)
@@ -449,7 +449,7 @@ def main():
 
 	port=data_server.get_port()
 	
-	data_server.add_session('0.0.0.0', 4502,111,222,1,10,'testi/temp.txt',"0bb3c3191be5185193fbbb12ff02d0fc",205,True)
+	data_server.add_session('0.0.0.0', 4502,111,222,1,10,'testi/7z920-arm.exe',"bf5ef3508df8b20a514dfb116e76ceaf",573900,True)
 
 	
 main()

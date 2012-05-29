@@ -34,7 +34,7 @@ class Security:
         cipher = AES.new(key, AES.MODE_CFB, iv)
         return (iv,key,cipher)
     
-    def generate_key_AES(self):
+    def generate_key_AES(self, secret = None):
         # one-liner to sufficiently pad the text to be encrypted
         pad = lambda s: s + (self.BLOCK_SIZE - len(s) % self.BLOCK_SIZE) * self.PADDING
         
@@ -44,11 +44,12 @@ class Security:
         self.DecodeAES = lambda c, e: c.decrypt(base64.b64decode(e)).rstrip(self.PADDING)
         
         # generate a random secret key
-        secret = os.urandom(self.BLOCK_SIZE)
+        if secret is None:
+            secret = os.urandom(self.BLOCK_SIZE)
         
         # create a cipher object using the random secret
         cipher = AES.new(secret)
-        return cipher
+        return (cipher,secret)
     
     def encrypt_AES(self,cipher,data):
         return self.EncodeAES(cipher, data)

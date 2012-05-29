@@ -27,7 +27,7 @@ class DataServer(Thread):
 		self.logger = logging.getLogger("Data server started: ip %s, port %s" % (ip,port))
 
 		try:
-	      		self.sock = LossySocket(socket.AF_INET, socket.SOCK_DGRAM,0,0)
+	      		self.sock = LossySocket(socket.AF_INET, socket.SOCK_DGRAM, 0.0, 0.0)
 			self.sock.bind((ip, port))
 			self.sock.setblocking(0) # non-blocking
 			self.port_list.append([port,self.sock])
@@ -174,7 +174,7 @@ class DataServer(Thread):
 
 class DataSession():
 
-	#socket = None
+	socket = None
 
 	chunk_size = 500.0  
 	temp_file_path = None
@@ -241,7 +241,7 @@ class DataSession():
 
 		else:
 			packet_to_send = OutPacket()
-			packet_to_send.create_packet(version=self.version, flags=[0],senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id,sequence=0, otype='DATA', ocode='REQUEST')
+			packet_to_send.create_packet(version=self.version, flags=[0],senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id, otype='DATA', ocode='REQUEST')
 			packet_to_send.append_entry_to_TLVlist('DATA', self.file_path)
 
 			for chunk in self.failed_chunks.itervalues():
@@ -276,35 +276,37 @@ class DataSession():
 
 			print("response received")			
 	
-			tlvlist = packet.get_TLVlist('DATA') # actual data
-                        #print(tlvlist[0])
+			data = packet.get_TLVlist('DATA') # actual data
+                        #print(data[0])
 			
 			#check md5sum
 
-			tlvlist2 = packet.get_TLVlist('DATACONTROL')
+			control = packet.get_TLVlist('DATACONTROL')
+			value = control[0].split('?')
+			# value[0] ="id", value[1]= id, value[2]=md5sum
 
-                        if tlvlist2[0]==self.get_md5sum(tlvlist[0]): #md5sum is ok
-				print("md5sum matched, seqno:"+str(packet.get_sequence()))
-				self.chunks_to_receive.remove(packet.get_sequence())
+                        if value[2]==self.get_md5sum(data[0]): #md5sum is ok
+				print("md5sum matched")
 				#TODO: check if chunk is already received and then ignore it
-				if self.failed_chunks.get(packet.get_sequence())==None:
+				self.chunks_to_receive.remove(int(value[1]))
+				if self.failed_chunks.get(int(value[1]))==None:
                                 	pass
 				else:
-					del self.failed_chunks[packet.get_sequence()]
+					del self.failed_chunks[value[1]]
 
 			else:
 				print("md5sum mismatched")
- 				if self.failed_chunks.get(packet.get_sequence())==None:
-					self.failed_chunks[packet.get_sequence()] = 1
+ 				if self.failed_chunks.get(value[1])==None:
+					self.failed_chunks[value[1]] = 1
 				else:
-					self.failed_chunks[packet.get_sequence()] += 1
+					self.failed_chunks[value[1]] += 1
 
 			if self.allocated == False:
 
 				self.allocate_file(self.temp_file_path)
 				self.allocated = True		
 
-			self.construct_file(self.temp_file_path,packet.get_sequence(),tlvlist[0])
+			self.construct_file(self.temp_file_path,value[1],data[0])
 
 			if self.transfer_status()==True:
 				print("done")
@@ -315,12 +317,10 @@ class DataSession():
 
 		elif packet.otype == OPERATION['DATA'] and packet.ocode == CODE['REQUEST']:
 
-		
-			#packet.print_packet()
 			print("request received")
 
-			tlvlist = packet.get_TLVlist('DATA')
-			#TODO: verify that file pat is valid
+			data = packet.get_TLVlist('DATA')
+			#TODO: verify that file path (data[0]) is valid
 
                         tlvlist = packet.get_TLVlist('DATACONTROL')
                         for tlv in tlvlist:
@@ -350,7 +350,7 @@ class DataSession():
 	def bye_req(self):
 
                 packet_to_send = OutPacket()
-                packet_to_send.create_packet(version=self.version, flags=[0],senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id,sequence=0, otype='BYE', ocode='REQUEST')
+                packet_to_send.create_packet(version=self.version, flags=[0],senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id, otype='BYE', ocode='REQUEST')
 
 		self.connection.send_packet_reliable(packet_to_send)
 		#self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
@@ -358,7 +358,7 @@ class DataSession():
         def bye_response(self):
 
                 packet_to_send = OutPacket()
-                packet_to_send.create_packet(version=self.version, flags=[0],senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id,sequence=0, otype='BYE', ocode='RESPONSE')
+                packet_to_send.create_packet(version=self.version, flags=[0],senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id, otype='BYE', ocode='RESPONSE')
 
 		self.connection.send_packet_reliable(packet_to_send)
                 #self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
@@ -369,13 +369,13 @@ class DataSession():
         def data_req(self,from_chunk,to_chunk):
 
                 packet_to_send = OutPacket()
-                packet_to_send.create_packet(version=self.version, flags=[0],senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id, sequence=0, otype='DATA', ocode='REQUEST')
+                packet_to_send.create_packet(version=self.version, flags=[0],senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id, otype='DATA', ocode='REQUEST')
                 packet_to_send.append_entry_to_TLVlist('DATA', self.file_path)
                 packet_to_send.append_entry_to_TLVlist('DATACONTROL', 'from?%d' % from_chunk +'?to?%d' %to_chunk)
 	
 		#print(packet_to_send)
-                self.connection.send_packet_reliable(packet_to_send)
-		#self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
+                #self.connection.send_packet_reliable(packet_to_send)
+		self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
 				
 
         def data_response(self,from_chunk, to_chunk):
@@ -383,15 +383,15 @@ class DataSession():
 		for x in range(from_chunk, to_chunk+1):
 
                 	packet_to_send = OutPacket()
-                	packet_to_send.create_packet(version=self.version, flags=[0], senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id,sequence=x, otype='DATA', ocode='RESPONSE')
+                	packet_to_send.create_packet(version=self.version, flags=[0], senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id, otype='DATA', ocode='RESPONSE')
                 	
 			chunk=self.get_chunk(x)
 			packet_to_send.append_entry_to_TLVlist('DATA', chunk)
-			packet_to_send.append_entry_to_TLVlist('DATACONTROL',self.get_md5sum(chunk))
+			packet_to_send.append_entry_to_TLVlist('DATACONTROL','id?%d?' %x + self.get_md5sum(chunk))
 
-			self.connection.send_packet_reliable(packet_to_send)
-			#self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
-			#time.sleep(0.01)
+			#self.connection.send_packet_reliable(packet_to_send)
+			self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
+			time.sleep(0.01)
 	
 	def ensure_folder_structure(self,file_path):
     		d = os.path.dirname(self.folder+"/"+file_path)

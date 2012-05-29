@@ -1,8 +1,9 @@
-import logging, socket, random, select, sys, time, os, hashlib
+import logging, socket, random, select, sys, time, os, hashlib, subprocess
 from threading import Thread
 
 from PacketManager import *
 from Connection import *
+from FileSystem import *
 
 class DataServer(Thread):
 
@@ -472,14 +473,53 @@ class DataSession():
 				
 def main():
 
-	data_server = DataServer("folder",'0.0.0.0',4500)
-	data_server.start()
-	data_server.add_port()
-	#data_server.remove_port(4500)
+    if len(sys.argv) == 6 and sys.argv[1] == "-s":
+        print 'Starting server'
+        client = True
+        lport = 5000
+        rport = 6000
+        p = float(sys.argv[2])
+        q = float(sys.argv[3])
+        folder = sys.argv[4]
+        sfolder = sys.argv[5]
+        f = 'dataconnection.tmp'
+        h = str(FileSystem.get_md5sum_hex(sfolder+f))
+        lses = 111
+        rses = 222
+    elif len(sys.argv) == 5 and sys.argv[1] == "-c":
+        print 'Starting client'
+        client = False
+        lport = 6000
+        rport = 5000
+        p = float(sys.argv[2])
+        q = float(sys.argv[3])
+        folder = '/tmp/'
+        size = int(sys.argv[4])
+        f = 'dataconnection.tmp'
+        subprocess.call(['dd', 'if=/dev/urandom', 'of=%s' % (folder+f), 'bs=%d' % size, 'count=1'])
+        h = str(FileSystem.get_md5sum_hex(folder+f))
+        lses = 222
+        rses = 111
+    else:
+        sys.exit("Args: [server -s, or client -c] [p value] [q value] <folder for server> <filesize for client> <server's folder for client>")
 
-	port=data_server.get_port()
-	
-	data_server.add_session('0.0.0.0', 4502,111,222,1,10,'testi/7z920-arm.exe',"bf5ef3508df8b20a514dfb116e76ceaf",573900,True)
+    data_server = DataServer(folder,'0.0.0.0',lport)
+    data_server.start()
+    data_server.add_port()
+    #data_server.remove_port(4500)
+
+    port = data_server.get_port()
+
+    data_server.add_session('0.0.0.0', rport,lses,rses,1,10,f,h,573900,client)
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print 'CTRL+C received, killing data server...'
+        data_server.kill_server()
+        if client:
+            subprocess.call(['rm', '%s' % f])
 
 	
 if __name__ == '__main__':

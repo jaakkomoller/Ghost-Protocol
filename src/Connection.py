@@ -48,7 +48,10 @@ class debug:
 # It provides flow control, security, authentication, and/or congestion control if needed.
 class Connection:
 
-    # TODO: move session and user id into SignalConnection
+    class CongState:
+        slow_start = 0
+        cong_avoid = 1
+
     max_seq = int("FFFF", 16)
     max_session_id = int("FF", 16)
     max_user_id = int("FF", 16)
@@ -56,13 +59,15 @@ class Connection:
     init_rtt = 1.0 # Initial RTT in secs
     rto_mean_rtts = 5 # RTO is a mean of these * rto_times_rtt
     rto_times_rtt = 3 # RT= is rto_mean_rtts * rto_times_rtt
+    max_local_send_window = 100
+    cong_avoid_drop = 0.8
 
     # TODO check initializations
     # TODO change server to jsut sock for Connection object
     def __init__(self, sock, remote_ip, remote_port, local_session_id, remote_session_id = 0,
             version = 1, send_ack_no = random.randint(0, max_seq-1),
             seq_no = random.randint(0, max_seq-1),
-            rtt = init_rtt, logger_str = "Connection to", max_local_send_window = 10, remote_send_window = 10):
+            rtt = init_rtt, logger_str = "Connection to", local_cong_window = 10, remote_window = 10):
         self.sock = sock     # Pointer to server socket
         self.version = version
         self.remote_ip = remote_ip
@@ -70,15 +75,13 @@ class Connection:
         self.seq_no = seq_no
         self.send_ack_no = send_ack_no
         self.recv_ack_no = 0
-        self.max_local_send_window = max_local_send_window
-        self.local_send_window = max_local_send_window
-        self.remote_send_window = remote_send_window
+        self.local_send_window = self.max_local_send_window
+        self.remote_send_window = remote_window
         self.local_session_id = local_session_id
         self.remote_session_id = remote_session_id
-        self.rto_buffer = RingBuffer(self.rto_mean_rtts)
         self.remote_send_time = 0.0
         self.remote_send_time_receive_time = 0.0
-        self.unack_queue = RingBuffer(10)    # Queue of sent, but unacked packets
+        self.unack_queue = RingBuffer(self.max_local_send_window)    # Queue of sent, but unacked packets
         self.sync = thread.allocate_lock()
         self.resends = 0
 
@@ -86,12 +89,18 @@ class Connection:
         self.logger = logging.getLogger(logger_str)
         self.logger.info("Initializing connection to %s:%i at %s" % (self.remote_ip, self.remote_port, str(time.time())))
 
+        self.rtt_buffer = RingBuffer(self.rto_mean_rtts)
         self.__setRtt__(rtt)
         self.rto = self.rtt * self.rto_times_rtt
+        self.rtt_mean = rtt
         self.resend_timer = None
         self.resend_timer_lock = thread.allocate_lock() # Synchronization for resend timer handling
 
         self.resend_send_ack = False
+
+        self.cong_state = Connection.CongState.slow_start
+        self.local_cong_window = local_cong_window
+        self.last_packet_recv_time = -1 # Last time a packet was received
 
     def receive_packet_start(self, packet):
         start = time.time()
@@ -114,6 +123,17 @@ class Connection:
             self.logger.debug("Expecting %d, got %d" % (wrapped_plus(self.send_ack_no, 1, Connection.max_seq),
                 packet.sequence))
             ret = False
+
+        if self.cong_state == Connection.CongState.slow_start:
+            self.local_cong_win_plus(1)
+            self.logger.debug('Slow start: Congestion window increased to %d' % self.local_cong_window)
+        elif self.cong_state == Connection.CongState.cong_avoid and self.last_packet_recv_time > 0 and \
+                time.time() - self.last_packet_recv_time > self.rtt_mean:
+            self.local_cong_win_plus(1)
+            self.logger.debug('Cong avoid: Congestion window increased to %d' % self.local_cong_window)
+            self.last_packet_recv_time = time.time()
+        elif self.last_packet_recv_time < 0:
+            self.last_packet_recv_time = time.time()
 
         #print packet.sequence
         self.recv_ack_no = packet.ack
@@ -272,7 +292,8 @@ class Connection:
         
         packet.send_time = time.time()
         self.resend_send_ack = False
-
+#        print(packet)
+#       print packet.build_packet()
         self.sock.sendto(packet.build_packet(), (self.remote_ip, self.remote_port), resend, packet.sequence)
     
     def no_ack_timeout(self):
@@ -286,19 +307,30 @@ class Connection:
                 self.__send_out(packet, resend = True)
                 packet.resends += 1
                 self.logger.debug('Resend done, resends %d, tlvs in packet %d' % (self.resends, len(packet.TLVs)))
+        self.packet_loss()
         self.resends += 1
 
     def __setRtt__(self, rtt):
         if rtt >= 0:
-            self.rto_buffer.append(rtt)
+            self.rtt_buffer.append(rtt)
             self.rtt = rtt
-            self.rto = self.rto_times_rtt * sum(self.rto_buffer.get_no_nones()) / len(self.rto_buffer.get_no_nones())
+            self.rtt_mean = sum(self.rtt_buffer.get_no_nones()) / len(self.rtt_buffer.get_no_nones())
+            self.rto = self.rto_times_rtt * self.rtt_mean
             self.logger.debug('rto set to %f' % self.rto)
         else:
             self.logger.debug('Invalid RTT: %f. Setting to init RTT.' % rtt)
             self.rtt = Connection.init_rtt
         if self.rtt > 1.0:
             self.logger.debug("RTT set to over 1 second.")
+
+    def packet_loss(self):
+        if self.cong_state == Connection.CongState.slow_start:
+            self.cong_state = Connection.CongState.cong_avoid
+            self.local_cong_window = self.cong_avoid_drop * self.local_cong_window
+            self.logger.warning("Slow start: packet loss. cong window: %d" % self.local_cong_window)
+        elif self.cong_state == Connection.CongState.cong_avoid:
+            self.local_cong_window = self.cong_avoid_drop * self.local_cong_window
+            self.logger.warning("Cong avoid: packet loss. cong window: %d" % self.local_cong_window)
 
     def stop(self):
         self.resend_timer_lock.acquire()
@@ -321,6 +353,12 @@ class Connection:
     def recv_ack_no_is_smaller(self, num):
         # Returns the modulo of the seq no minus num
         return wrapped_is_smaller(self.recv_ack_no, num, self.max_seq)
+
+    def local_cong_win_plus(self, num):
+        if self.max_local_send_window >= (self.local_cong_window + num):
+            self.local_cong_window += num
+        else:
+            self.local_cong_window = self.max_local_send_window
 
     def reset_resend_timer(self, zzz, packet):
         # Creates a new resend timer or resets the existing timer's expire time.

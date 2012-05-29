@@ -77,7 +77,7 @@ class FileSystem:
                     
                 self.write_manifest(self.current_dic)
                 #Update hash manifest
-                self.hash_manifest = self.get_md5sum_hex(self.manifest_path, block_size=2**20)
+                self.hash_manifest = get_md5sum_hex(self.manifest_path, block_size=2**20)
                 #print "hash_manifest", self.hash_manifest
                 #Sleep for 1 second and detect changes
                 time.sleep(5)
@@ -301,13 +301,14 @@ class FileSystem:
                 timestamp = str(file_stats[ST_MTIME])
                 fname = pathname.split(self.root_path,1)[1][1:]
                 if deep:
-                    hashfile = str(self.get_md5sum_hex(pathname))
+                    hashfile = str(get_md5sum_hex(pathname))
                 infodic[('FIL',fname)]=['FIL',fname,filesize,timestamp,hashfile]
 
             else:
                 self.logger.error("Not a file or a directory: %s" % (str(pathname)))
     
-    def get_md5sum_hex(self, filename, block_size=2**20):
+    @staticmethod
+    def get_md5sum_hex(filename, block_size=2**20):
         fd = open(filename, 'r')
         md5 = hashlib.md5()
         while True:

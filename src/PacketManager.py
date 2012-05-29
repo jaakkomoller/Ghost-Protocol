@@ -59,6 +59,16 @@ class PacketManager():
             if TLVlist is not None:
                 self.append_list_to_TLVlist(TLVlist)
     
+    def packetize_header(self, rawdata):
+        del self.TLVs[:]
+        self.bytearrayTLV = ' '
+        
+        unpacked_header = struct.unpack("!BBHHH", rawdata[0:8])
+        (tmpbyte,self.nextTLV,self.senderID,self.txlocalID,self.txremoteID) = unpacked_header
+        self.version = tmpbyte >> 4
+        self.flags = tmpbyte & 0x0F
+        return True
+        
     def packetize_raw(self, rawdata):
         del self.TLVs[:]
         self.bytearrayTLV = ' '
@@ -105,6 +115,8 @@ class PacketManager():
             cvalue = rawdata[i:i+clen]
             i+=clen
             self.append_entry_to_TLVlist(RAWTLVTYPE[ctype],cvalue)
+        
+        return True
                 
     def create_TLV_entry(self, ttype, value):
         if len(value)>=10**TLVLENSIZE:

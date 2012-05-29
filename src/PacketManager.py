@@ -36,10 +36,10 @@ class PacketManager():
         self.ack=0
         self.otype=0
         self.ocode=0
-        self.TLVlist=None
+        self.TLVlist=[]
         self.rawdata=None
         self.bytearrayTLV = ' '
-        self.flag_list = None
+        self.flag_list = []
         
     def create_packet(self, version=1, flags=0, senderID=0, txlocalID=0, txremoteID=0,
                       sequence=0, ack=0, otype=0, ocode=0, TLVlist=None, rawdata=None):

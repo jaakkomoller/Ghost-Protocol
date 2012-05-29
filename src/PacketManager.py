@@ -27,6 +27,20 @@ class PacketManager():
         self.logger = logging.getLogger("PacketManager")
         self.logger.debug("PacketManager created")
         
+        self.version=1
+        self.flags=0
+        self.senderID=0
+        self.txlocalID=0
+        self.txremoteID=0
+        self.sequence=0
+        self.ack=0
+        self.otype=0
+        self.ocode=0
+        self.TLVlist=None
+        self.rawdata=None
+        self.bytearrayTLV = ' '
+        self.flag_list = None
+        
     def create_packet(self, version=1, flags=0, senderID=0, txlocalID=0, txremoteID=0,
                       sequence=0, ack=0, otype=0, ocode=0, TLVlist=None, rawdata=None):
         
@@ -172,7 +186,7 @@ class PacketManager():
         if self.flags & 4 == 4:
             flaglist.append('ECN')
         if self.flags & 2 == 2:
-            flaglist.append('URG')
+            flaglist.append('CRY')
         if self.flags & 1 == 1:
             flaglist.append('ACK')
         return flaglist
@@ -278,12 +292,12 @@ class PacketManager():
             self.logger.debug("There are no FLAGs to build")
             del self.flag_list[:]
             return
-        #FLAG = {'ACK':1, 'URG':2, 'ECN':4, 'SEC':8}
+        #FLAG = {'ACK':1, 'CRY':2, 'ECN':4, 'SEC':8}
         else:
             for item in self.flag_list:
                 if item == 'ACK':
                     flagvalue += 1
-                elif item == 'URG':
+                elif item == 'CRY':
                     flagvalue += 2
                 elif item == 'ECN':
                     flagvalue += 4
@@ -357,7 +371,32 @@ class PacketManager():
                     r=r+i2
             print r
             i += 16
+    
+    def hex_data(self,packet):
+        x=str(packet)
+        l = len(x)
+        i = 0
+        while i < l:
+            print "%04x  " % i,
+            for j in range(16):
+                if i+j < l:
+                    print "%02X" % ord(x[i+j]),
+                else:
+                    print "  ",
+                if j%16 == 7:
+                    print "",
+            print " ",
 
+            ascii = x[i:i+16]
+            r=""
+            for i2 in ascii:
+                j2 = ord(i2)
+                if (j2 < 32) or (j2 >= 127):
+                    r=r+"."
+                else:
+                    r=r+i2
+            print r
+            i += 16
 
 class OutPacket(PacketManager):
     send_time = 0.0

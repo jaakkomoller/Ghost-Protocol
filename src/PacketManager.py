@@ -67,6 +67,11 @@ class PacketManager():
         (tmpbyte,self.nextTLV,self.senderID,self.txlocalID,self.txremoteID) = unpacked_header
         self.version = tmpbyte >> 4
         self.flags = tmpbyte & 0x0F
+        self.sequence = 0
+        self.ack = 0
+        self.ocode = 0
+        self.otype = 0
+        self.checksum = 0
         return True
         
     def packetize_raw(self, rawdata):

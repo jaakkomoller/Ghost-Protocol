@@ -45,44 +45,38 @@ class DataServer(Thread):
 		timeout = 5
 			
 		while not self.kill_flag:
-
+			
             		input = select.select(self.read_list,[],[],timeout)
 
-            		# Data handling or time out
-			
-            		for s in input:
+            		# Data handling or timeout	
+
+			if input == ([], [], []):
+				#print "timeout"
+
+				#TODO: remove old sessions
+                                #TODO:check if we need to resend something
+
+     		     	for s in input:
 				for r in self.read_list:				            
                 			if s == [r]:
-			           	
+		         	
 	 					try:
 							buffer, addr = r.recvfrom(self.buffer_size)
 							self.received_packet.packetize_raw(buffer)
 
 							for session in self.session_list:
-
-								if self.received_packet.txremoteID == session.local_session_id and self.received_packet.txlocalID == session.remote_session_id:
 	
+								if self.received_packet.txremoteID == session.local_session_id and self.received_packet.txlocalID == session.remote_session_id:
+		
 									session.connection.receive_packet_start(self.received_packet)
-                       	                                		
-                               	                        		#TODO: Check socket
-
-
+                      	                                		
 									session.handle(self.received_packet)
 
-									session.connection.receive_packet_end(self.received_packet,session.sender_id)
-									#print "receive_packet_end"
-
+									session.connection.receive_packet_end(self.received_packet,session.sender_id)	
+				
 						except socket.error:
 							print("Error when reading a socket")
 			        
-			
-			#Timeout
- 				#if len(input) == 0:
-					#pass
-					#print "timeout"
-
-				#TODO: remove old sessions
-				#TODO:check if we need to resend something				
 		return	
 		
 
@@ -91,10 +85,7 @@ class DataServer(Thread):
 
 	def add_session(self, remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, md5sum, size, is_request):
 
-
-                #TODO: check socket (self.read_list[0])
                 connection = Connection(self.read_list[0], remote_ip, remote_port, local_session_id, remote_session_id,version, 0, 1 )
-
 		data_session = DataSession(remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, md5sum, size, self.folder, connection, 0) 
 
 
@@ -179,7 +170,6 @@ class DataServer(Thread):
 
 class DataSession():
 
-#	socket = None
 	packet = None
 	chunk_size = 1000.0  
 	temp_file_path = None
@@ -206,7 +196,6 @@ class DataSession():
 		self.initialize_transfer()		
 		self.connection=connection
 		
-#		self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 
 	def initialize_transfer(self): 
@@ -222,7 +211,6 @@ class DataSession():
 
 	def finish(self):
 
-		#print self.get_md5sum_file(self.temp_file_path)
 		if self.md5sum==self.get_md5sum_file(self.temp_file_path):
 			print("file transferred successfully")
 			self.ensure_folder_structure(self.file_path)
@@ -258,8 +246,6 @@ class DataSession():
                                 if status==True:
                                         break
 
-			#self.connection.send_packet_reliable(packet_to_send)
-                	#self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
 
 		
 
@@ -288,10 +274,8 @@ class DataSession():
 			#print("response received")			
 	
 			data = packet.get_TLVlist('DATA') # actual data
-                        #print(data[0])
 			
 			#check md5sum
-
 			control = packet.get_TLVlist('DATACONTROL')
 			value = control[0].split('?')
 			# value[0] ="id", value[1]= id, value[2]=md5sum
@@ -323,7 +307,7 @@ class DataSession():
 			self.construct_file(self.temp_file_path,int(value[1]),data[0])
 
 			if self.transfer_status()==True:
-				print("done")
+				#print("done")
 				self.finish()		
 	
 
@@ -334,7 +318,12 @@ class DataSession():
 			#print("request received")
 
 			data = packet.get_TLVlist('DATA')
-			#TODO: verify that file path (data[0]) is valid
+
+			# verify that file path (data[0]) is valid
+			if data[0]==self.file_path:
+				pass
+			else:
+				return
 
                         tlvlist = packet.get_TLVlist('DATACONTROL')
                         for tlv in tlvlist:
@@ -371,8 +360,6 @@ class DataSession():
                         if status==True:
                         	break
 
-		#self.connection.send_packet_reliable(packet_to_send)
-		#self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
 
         def bye_response(self):
 
@@ -385,8 +372,6 @@ class DataSession():
                         if status==True:
         	                break
 
-		#self.connection.send_packet_reliable(packet_to_send)
-                #self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
 
 
 
@@ -403,8 +388,7 @@ class DataSession():
                         if status==True:
                         	 break
 
-		#self.connection.send_packet_reliable(packet_to_send)
-		#self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
+
 				
 
         def data_response(self,from_chunk, to_chunk):
@@ -426,17 +410,15 @@ class DataSession():
         				break
 
 				try:
-					#print("trying to read")
-					#TODO: check & confirm session to be valid
 	                        	buffer, addr = self.connection.sock.recvfrom(2048)
 					received_packet.packetize_raw(buffer)
-					self.connection.receive_packet_start(received_packet)
+					# check & confirm that session is valid				
+					if received_packet.txremoteID == self.connection.local_session_id and received_packet.txlocalID == self.connection.remote_session_id:
+						self.connection.receive_packet_start(received_packet)
 
-					#print buffer
 				except socket.error:
-					#print ("could not read")
 					pass
-
+		
 
 			#self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
 			#time.sleep(0.01)

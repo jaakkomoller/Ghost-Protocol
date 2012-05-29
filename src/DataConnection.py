@@ -85,7 +85,7 @@ class DataServer(Thread):
 
         def add_session(self, remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, md5sum, size, is_request):
 
-                connection = Connection(self.read_list[0], remote_ip, remote_port, local_session_id, remote_session_id,version, 0, 1 )
+                connection = Connection(self.read_list[0], remote_ip, remote_port, local_session_id, remote_session_id,version, 0, 1, logger_str = 'Data connection to ')
                 data_session = DataSession(remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, md5sum, size, self.folder, connection, 0)
 
 

@@ -1,6 +1,7 @@
 import hashlib, logging
 from Crypto.PublicKey import RSA
 from Crypto import Cipher
+from Crypto import Random
 
 
 class Security:
@@ -18,17 +19,51 @@ class Security:
         publicKey = privateKey.publickey()
         return (privateKey, publicKey)
     
+    def generate_sharedkey(self):
+        iv = Random.new().read(AES.block_size)
+        key = Random.new().read(AES.block_size)
+        cipher = AES.new(key, AES.MODE_CFB, iv)
+        return (iv,key,cipher)
+    
+    def encrypt_sharedkey(self,iv,cipher,data):
+        msg = iv + cipher.encrypt(str(data))
+        return msg
+    
+    def decrypt_sharedkey(self,iv,cipher,data):
+        msg = cipher.decrypt(data)[len(iv):]
+        
+    
     def import_key(self, plaintextkey):
         return RSA.importKey(plaintextkey)
     
     def export_key(self, key):
         return key.exportKey()
     
-    def encrypt(self, key, data):
-        return key.encrypt(data, self.cryptoMode)[0]
+    def encrypt(self, key, data,chunksize=0, nbytes=0):
+        ciphertext = ''
+        i = 0
+        for i in range(0,len(data)/chunksize):
+            a = i*chunksize
+            b = a+chunksize
+            ciphertext += key.encrypt(data[a:b], self.cryptoMode)[0]
+        if b < len(data):
+            ciphertext += key.encrypt(data[b:], self.cryptoMode)[0]
+        
+        return ciphertext[nbytes:]
+        #return key.encrypt(data[nbytes:], self.cryptoMode)[0]
     
-    def decrypt(self, key, data):
-        return key.decrypt(data)
+    def decrypt(self, key, data,chunksize=0, nbytes=0):
+        ciphertext = ''
+        i = 0
+        for i in range(0,len(data)/chunksize):
+            a = i*chunksize
+            b = a+chunksize
+            ciphertext += key.decrypt(data[a:b], self.cryptoMode)[0]
+        if b < len(data):
+            ciphertext += key.decrypt(data[b:], self.cryptoMode)[0]
+        
+        return ciphertext[nbytes:]
+        #return key.decrypt(data[nbytes:])
     
     #Different values for key and password
     def calculate_key_hash(self, key, pwd):

@@ -51,11 +51,11 @@ class Security:
         cipher = AES.new(secret)
         return (cipher,secret)
     
-    def encrypt_AES(self,cipher,data):
-        return self.EncodeAES(cipher, data)
+    def encrypt_AES(self,cipher,data,nbytes):
+        return data[:nbytes] + self.EncodeAES(cipher, data[nbytes:])
     
-    def decrypt_AES(self,cipher,data):
-        return self.DecodeAES(cipher, data)
+    def decrypt_AES(self,cipher,data,nbytes):
+        return data[:nbytes] + self.EncodeAES(cipher, data[nbytes:])
         
     def import_key(self, plaintextkey):
         return RSA.importKey(plaintextkey)

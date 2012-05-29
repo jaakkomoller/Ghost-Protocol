@@ -58,9 +58,9 @@ class Security:
         for i in range(0,len(data)/chunksize):
             a = i*chunksize
             b = a+chunksize
-            ciphertext += key.decrypt(data[a:b], self.cryptoMode)[0]
+            ciphertext += key.decrypt(data[a:b])
         if b < len(data):
-            ciphertext += key.decrypt(data[b:], self.cryptoMode)[0]
+            ciphertext += key.decrypt(data[b:])
         
         return ciphertext[nbytes:]
         #return key.decrypt(data[nbytes:])

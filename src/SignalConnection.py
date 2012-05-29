@@ -53,9 +53,12 @@ class SignalServer(Thread):
             except socket.error:
                 errno, errstr = sys.exc_info()[:2]
                 if errno == socket.timeout:
-                    for connection in self.connection_list:
-                    # Check if the connection should send an update message
-                        connection.check_send_update()
+                    for i, connection in enumerate(self.connection_list):
+                        # Check if the connection should send an update message
+                        # Also remove broken connections
+                        if not connection.check_send_update():
+                            connection.stop()
+                            del self.connection_list[i]
                     #self.logger.info("socket timeout")
                     continue
                 else:
@@ -89,9 +92,12 @@ class SignalServer(Thread):
             elif not found:
                 self.logger.info("Packet does not belong to any connection and not a valid HELLO. Discarding.")
             self.logger.info("done with packet.\n")
-            for connection in self.connection_list:
+            for i, connection in enumerate(self.connection_list):
                 # Check if the connection should send an update message
-                connection.check_send_update()
+                # Also remove broken connections
+                if not connection.check_send_update():
+                    connection.stop()
+                    del self.connection_list[i]
             self.connection_list_lock.release()
                 
 
@@ -292,7 +298,7 @@ class SignalConnection(Connection):
             self.logger.error('invalid packet or state')
     
         if self.state == SignalConnection.State.CONNECTED:
-            self.receive_packet_end(packet)
+            self.receive_packet_end(packet, self.server.sender_id)
 
     def check_send_update(self):
         # Returns False if the connection should be shut down.

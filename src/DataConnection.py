@@ -20,7 +20,7 @@ class DataServer(Thread):
                 Thread.__init__(self)
                 self.ip=ip
                 self.port=port
-                self.folder = folder        
+                self.folder = folder
 
                 if not ip: ip = '0.0.0.0'
                 if not port: port = random.randint(4500, 4600)
@@ -41,53 +41,52 @@ class DataServer(Thread):
 
 
         def run(self):
-                
+
                 timeout = 5
-                        
+
                 while not self.kill_flag:
-                        
+
                         input = select.select(self.read_list,[],[],timeout)
 
-                            # Data handling or timeout        
+                            # Data handling or timeout
 
                         if input == ([], [], []):
                             pass
                             #print "timeout"
-
-                                #TODO: remove old sessions
-                                #TODO:check if we need to resend something
+                            #TODO: remove old sessions
+                            #TODO: check if we need to resend something
 
                         for s in input:
-                                for r in self.read_list:                                            
+                                for r in self.read_list:
                                         if s == [r]:
-                                 
+
                                                 try:
                                                         buffer, addr = r.recvfrom(self.buffer_size)
                                                         self.received_packet.packetize_raw(buffer)
 
                                                         for session in self.session_list:
-        
+
                                                                 if self.received_packet.txremoteID == session.local_session_id and self.received_packet.txlocalID == session.remote_session_id:
-                
+
                                                                         session.connection.receive_packet_start(self.received_packet)
-                                                                              
+
                                                                         session.handle(self.received_packet)
 
-                                                                        session.connection.receive_packet_end(self.received_packet,session.sender_id)        
-                                
+                                                                        session.connection.receive_packet_end(self.received_packet,session.sender_id)
+
                                                 except socket.error:
                                                         print("Error when reading a socket")
-                                
-                return        
-                
+
+                return
+
 
         def kill_server(self):
-                self.kill_flag=True        
+                self.kill_flag=True
 
         def add_session(self, remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, md5sum, size, is_request):
 
                 connection = Connection(self.read_list[0], remote_ip, remote_port, local_session_id, remote_session_id,version, 0, 1 )
-                data_session = DataSession(remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, md5sum, size, self.folder, connection, 0) 
+                data_session = DataSession(remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, md5sum, size, self.folder, connection, 0)
 
 
                 fail = False
@@ -95,8 +94,8 @@ class DataServer(Thread):
 
                         #TODO: move this
                         if session.status==1 or session.status==2:
-                                self.session_list.remove(session)        
-                        
+                                self.session_list.remove(session)
+
                         if session.local_session_id==data_session.local_session_id and session.remote_session_id==data_session.remote_session_id:
                                 #print("ignore session, it's already there")
                                 fail=True
@@ -113,15 +112,15 @@ class DataServer(Thread):
 
         def add_port(self, new_port=""):
                 self.new_port=new_port
-                
+
                 if not new_port: new_port = random.randint(4500, 4600)
 
                 if len(self.port_list)==100:
                         return
-                
+
                 run = True
                 while (run):
-                        
+
                         temp = False
                         for x in self.port_list:
                                 if x[0] == new_port:
@@ -133,7 +132,7 @@ class DataServer(Thread):
                                 run = True
                         else:
                                 run = False # port was added successfully
-                                
+
 
 
                 self.logger = logging.getLogger("New port added: port %s" % (new_port))
@@ -141,7 +140,7 @@ class DataServer(Thread):
                 try:
                         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                         self.sock.bind((self.ip, new_port))
-                        self.sock.setblocking(0) # non-blocking 
+                        self.sock.setblocking(0) # non-blocking
                         self.port_list.append([new_port,self.sock])
                         self.read_list.append(self.sock)
 
@@ -150,17 +149,17 @@ class DataServer(Thread):
 
 
         def remove_port(self, old_port):
-                  self.old_port=old_port
-                
+                self.old_port=old_port
+
                 try:
-                                                
+
                         rm = [x[0] for x in self.port_list].index(old_port)
-                        temp_val=self.port_list.pop(rm)                        
+                        temp_val=self.port_list.pop(rm)
                         self.read_list.remove(temp_val[1])
-                                                
+
                 except:
                         pass
-        
+
 
         def get_port(self):
                 from random import choice
@@ -172,9 +171,9 @@ class DataServer(Thread):
 class DataSession():
 
         packet = None
-        chunk_size = 1000.0  
+        chunk_size = 1000.0
         temp_file_path = None
-        allocated = False        
+        allocated = False
         chunks_to_receive = []
         failed_chunks = {}
         #status: 0 = processing, 1 = ready, 2 = failed
@@ -189,21 +188,21 @@ class DataSession():
                 self.sender_id = sender_id
                 self.file_path = file_path
                 self.md5sum = md5sum
-                self.size = size # in bytes 
-                self.folder = folder 
-                self.status = status 
+                self.size = size # in bytes
+                self.folder = folder
+                self.status = status
                 #a temp file location
                 self.temp_file_path = self.folder+"/.private/file_"+str(self.local_session_id)+str(self.remote_session_id)+str(self.sender_id)+".temp"
-                self.initialize_transfer()                
+                self.initialize_transfer()
                 self.connection=connection
-                
 
 
-        def initialize_transfer(self): 
+
+        def initialize_transfer(self):
                 max = self.get_chunk_count()
                 for x in range(1, max+1):
                         self.chunks_to_receive.append(x)
-        
+
         def transfer_status(self):
                 if len(self.chunks_to_receive)==0:
                         return True
@@ -229,10 +228,10 @@ class DataSession():
 
                 if len(self.failed_chunks)==0:
                         return
-    
+
                 elif max(self.failed_chunks, key=self.failed_chunks.get)>5:
-                           self.status=2
-                        self.bye_req()
+                    self.status=2
+                    self.bye_req()
 
                 else:
                         packet_to_send = OutPacket()
@@ -241,14 +240,14 @@ class DataSession():
 
                         for chunk in self.failed_chunks.itervalues():
                                 packet_to_send.append_entry_to_TLVlist('DATACONTROL', 'from?%d' %chunk +'?to?%d' %chunk)
-                      
+
                         while True:
                                 status=self.connection.send_packet_reliable(packet_to_send)
                                 if status==True:
                                         break
 
 
-                
+
 
 
         def handle(self, packet):
@@ -261,21 +260,21 @@ class DataSession():
                 if packet.otype == OPERATION['BYE'] and packet.ocode == CODE['REQUEST']:
                         self.status=1
                         self.bye_response()
-                        
+
 
                 elif packet.otype == OPERATION['BYE'] and packet.ocode == CODE['RESPONSE']:
                         pass
-                        
+
 
                 elif self.status==1 or self.status==2:
                         return
 
-                elif packet.otype == OPERATION['DATA'] and packet.ocode == CODE['RESPONSE']:        
+                elif packet.otype == OPERATION['DATA'] and packet.ocode == CODE['RESPONSE']:
 
-                        #print("response received")                        
-        
+                        #print("response received")
+
                         data = packet.get_TLVlist('DATA') # actual data
-                        
+
                         #check md5sum
                         control = packet.get_TLVlist('DATACONTROL')
                         value = control[0].split('?')
@@ -295,7 +294,7 @@ class DataSession():
 
                         else:
                                 print("md5sum mismatched")
-                                 if self.failed_chunks.get(value[1])==None:
+                                if self.failed_chunks.get(value[1])==None:
                                         self.failed_chunks[value[1]] = 1
                                 else:
                                         self.failed_chunks[value[1]] += 1
@@ -303,14 +302,14 @@ class DataSession():
                         if self.allocated == False:
 
                                 self.allocate_file(self.temp_file_path)
-                                self.allocated = True                
+                                self.allocated = True
 
                         self.construct_file(self.temp_file_path,int(value[1]),data[0])
 
                         if self.transfer_status()==True:
                                 #print("done")
-                                self.finish()                
-        
+                                self.finish()
+
 
 
 
@@ -329,12 +328,12 @@ class DataSession():
                         tlvlist = packet.get_TLVlist('DATACONTROL')
                         for tlv in tlvlist:
                                 temp = tlv.split('?')
-                                
+
                                 if temp[0] == 'from':
                                         from_chunk=temp[1]
                                         print("from chunk")
                                         print(from_chunk)
-                                        from_ok = 1                                        
+                                        from_ok = 1
 
                                 if temp[2] == 'to':
                                         to_chunk=temp[3]
@@ -346,8 +345,8 @@ class DataSession():
                                         self.data_response(int(from_chunk),int(to_chunk))
                                         from_ok = 0
                                         to_ok = 0
-                
-        
+
+
                 else:
                         pass
 
@@ -376,21 +375,21 @@ class DataSession():
 
 
 
-        
+
         def data_req(self,from_chunk,to_chunk):
 
                 packet_to_send = OutPacket()
                 packet_to_send.create_packet(version=self.version, flags=[0],senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id, otype='DATA', ocode='REQUEST')
                 packet_to_send.append_entry_to_TLVlist('DATA', self.file_path)
                 packet_to_send.append_entry_to_TLVlist('DATACONTROL', 'from?%d' % from_chunk +'?to?%d' %to_chunk)
-        
+
                 while True:
                         status=self.connection.send_packet_reliable(packet_to_send)
                         if status==True:
-                                 break
+                            break
 
 
-                                
+
 
         def data_response(self,from_chunk, to_chunk):
 
@@ -398,7 +397,7 @@ class DataSession():
 
                         packet_to_send = OutPacket()
                         packet_to_send.create_packet(version=self.version, flags=[0], senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id, otype='DATA', ocode='RESPONSE')
-                        
+
                         chunk=self.get_chunk(x)
                         packet_to_send.append_entry_to_TLVlist('DATA', chunk)
                         packet_to_send.append_entry_to_TLVlist('DATACONTROL','id?%d?' %x + self.get_md5sum(chunk))
@@ -406,24 +405,24 @@ class DataSession():
                         received_packet = InPacket()
 
                         while True:
-                                 status=self.connection.send_packet_reliable(packet_to_send)
-                                if status==True:
-                                        break
+                            status=self.connection.send_packet_reliable(packet_to_send)
+                            if status==True:
+                                    break
 
-                                try:
-                                        buffer, addr = self.connection.sock.recvfrom(2048)
-                                        received_packet.packetize_raw(buffer)
-                                        # check & confirm that session is valid                                
-                                        if received_packet.txremoteID == self.connection.local_session_id and received_packet.txlocalID == self.connection.remote_session_id:
-                                                self.connection.receive_packet_start(received_packet)
+                            try:
+                                buffer, addr = self.connection.sock.recvfrom(2048)
+                                received_packet.packetize_raw(buffer)
+                                # check & confirm that session is valid
+                                if received_packet.txremoteID == self.connection.local_session_id and received_packet.txlocalID == self.connection.remote_session_id:
+                                    self.connection.receive_packet_start(received_packet)
 
-                                except socket.error:
-                                        pass
-                
+                            except socket.error:
+                                    pass
+
 
                         #self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
                         #time.sleep(0.01)
-        
+
         def ensure_folder_structure(self,file_path):
                     d = os.path.dirname(self.folder+"/"+file_path)
                     if not os.path.exists(d):
@@ -436,25 +435,24 @@ class DataSession():
 
         def get_md5sum_file(self,filename, block_size=2**20):
                 file = open(filename, 'r')
-                    md5 = hashlib.md5()
-                   while True:
-                        data = file.read(block_size)
-                        if not data:
-                                    break
-                        md5.update(data)
+                md5 = hashlib.md5()
+                while True:
+                    data = file.read(block_size)
+                    if not data:
+                        break
+                    md5.update(data)
                 file.close()
-                    return md5.hexdigest()
+                return md5.hexdigest()
 
 
         def get_chunk_count(self):
+            chunks = self.size/self.chunk_size
+            rounded = round(chunks)
 
-                chunks = self.size/self.chunk_size
-                 rounded = round(chunks)
- 
-                if chunks - rounded > 0:
-                        return int(rounded + 1)
-                else:
-                        return int(rounded) 
+            if chunks - rounded > 0:
+                return int(rounded + 1)
+            else:
+                return int(rounded)
 
 
         def get_chunk(self,id):
@@ -497,7 +495,7 @@ class DataSession():
 
 
 
-                                
+
 def main():
 
     if len(sys.argv) == 6 and sys.argv[1] == "-c":
@@ -552,6 +550,6 @@ def main():
         #if client:
             #subprocess.call(['rm', '%s' % f])
 
-        
+
 if __name__ == '__main__':
     main()

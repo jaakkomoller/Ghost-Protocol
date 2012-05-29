@@ -12,11 +12,11 @@ TLVTYPESIZE = 1
 TLVLENSIZE = 4
 NULLTLV = 0xFF
 TLVTYPE = {'TXCONTROL':1, 'DATACONTROL':2, 'DATA':3, 'SECURITY':4}
-RAWTLVTYPE = {0:'NONE', 1:'TXCONTROL', 2:'DATACONTROL', 3:'DATA', 4:'SECURITY'}
+RAWTLVTYPE = {1:'TXCONTROL', 2:'DATACONTROL', 3:'DATA', 4:'SECURITY'}
 OPERATION = {'HELLO':1, 'UPDATE':2, 'LIST':3, 'PULL':4, 'DATA':5, 'BYE':6}
 CODE = {'REQUEST':1, 'RESPONSE':2}
-REV_OPERATION = {0:'NONE', 1:'HELLO', 2:'UPDATE', 3:'LIST', 4:'PULL', 5:'DATA', 6:'BYE'}
-REV_CODE = {0:'NONE', 1:'REQUEST', 2:'RESPONSE'}
+REV_OPERATION = {1:'HELLO', 2:'UPDATE', 3:'LIST', 4:'PULL', 5:'DATA', 6:'BYE'}
+REV_CODE = {1:'REQUEST', 2:'RESPONSE'}
 #FLAG = {'ACK':1, 'URG':2, 'ECN':4, 'SEC':8}     #Not YET in use
 #FLAG_REV = {1:'ACK', 2:'URG', 4:'ECN', 8:'SEC'} #Not YET in use
 
@@ -81,11 +81,6 @@ class PacketManager():
         (tmpbyte,self.nextTLV,self.senderID,self.txlocalID,self.txremoteID) = unpacked_header
         self.version = tmpbyte >> 4
         self.flags = tmpbyte & 0x0F
-        self.sequence = 0
-        self.ack = 0
-        self.ocode = 0
-        self.otype = 0
-        self.checksum = 0
         return True
         
     def packetize_raw(self, rawdata):
@@ -371,8 +366,9 @@ class PacketManager():
                     r=r+i2
             print r
             i += 16
-    
-    def hex_data(self,packet):
+
+    @staticmethod
+    def hex_data(packet):
         x=str(packet)
         l = len(x)
         i = 0
@@ -401,8 +397,10 @@ class PacketManager():
 class OutPacket(PacketManager):
     send_time = 0.0
     resends = 0
-    def __init__(self):
+    no_enc = False
+    def __init__(self, no_enc = False):
         PacketManager.__init__(self)
+        self.no_enc = no_enc
 
 class InPacket(PacketManager):
     receive_time = 0.0

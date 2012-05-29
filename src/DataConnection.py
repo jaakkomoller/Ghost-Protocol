@@ -35,7 +35,7 @@ class DataServer(Thread):
 			self.read_list.append(self.sock)
 
 		except socket.error:
-			self.logger.alarm("Error with socket")
+			print("Error with socket")
 
 		self.received_packet = InPacket()
 
@@ -44,11 +44,12 @@ class DataServer(Thread):
 		
 		timeout = 5
 			
-		while True:
+		while not self.kill_flag:
 
             		input = select.select(self.read_list,[],[],timeout)
 
             		# Data handling or time out
+			
             		for s in input:
 				for r in self.read_list:				            
                 			if s == [r]:
@@ -60,27 +61,30 @@ class DataServer(Thread):
 							for session in self.session_list:
 
 								if self.received_packet.txremoteID == session.local_session_id and self.received_packet.txlocalID == session.remote_session_id:
-
-									#TODO: receive-> start & end
-                                                        		session.connection.receive_packet_start(self.received_packet)
-                                                        		session.connection.receive_packet_end(self.received_packet,session.sender_id)
-                                                        		#TODO: Check socket
+	
+									session.connection.receive_packet_start(self.received_packet)
+                       	                                		
+                               	                        		#TODO: Check socket
 
 
 									session.handle(self.received_packet)
 
+									session.connection.receive_packet_end(self.received_packet,session.sender_id)
+									#print "receive_packet_end"
 
 						except socket.error:
-							self.logger.alarm("Error with socket")
-
-
+							print("Error when reading a socket")
+			        
+			
 			#Timeout
- 			if len(self.read_list) == 0:
-            			if self.kill_flag == True:
-					return
+ 				#if len(input) == 0:
+					#pass
+					#print "timeout"
+
 				#TODO: remove old sessions
 				#TODO:check if we need to resend something				
-				
+		return	
+		
 
 	def kill_server(self):
 		self.kill_flag=True	
@@ -175,8 +179,8 @@ class DataServer(Thread):
 
 class DataSession():
 
-	socket = None
-
+#	socket = None
+	packet = None
 	chunk_size = 1000.0  
 	temp_file_path = None
 	allocated = False	
@@ -202,7 +206,7 @@ class DataSession():
 		self.initialize_transfer()		
 		self.connection=connection
 		
-		self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+#		self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 
 	def initialize_transfer(self): 
@@ -218,6 +222,7 @@ class DataSession():
 
 	def finish(self):
 
+		#print self.get_md5sum_file(self.temp_file_path)
 		if self.md5sum==self.get_md5sum_file(self.temp_file_path):
 			print("file transferred successfully")
 			self.ensure_folder_structure(self.file_path)
@@ -247,8 +252,13 @@ class DataSession():
 
 			for chunk in self.failed_chunks.itervalues():
 		                packet_to_send.append_entry_to_TLVlist('DATACONTROL', 'from?%d' %chunk +'?to?%d' %chunk)
+                      
+			while True:
+                                status=self.connection.send_packet_reliable(packet_to_send)
+                                if status==True:
+                                        break
 
-			self.connection.send_packet_reliable(packet_to_send)
+			#self.connection.send_packet_reliable(packet_to_send)
                 	#self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
 
 		
@@ -275,7 +285,7 @@ class DataSession():
 
 		elif packet.otype == OPERATION['DATA'] and packet.ocode == CODE['RESPONSE']:	
 
-			print("response received")			
+			#print("response received")			
 	
 			data = packet.get_TLVlist('DATA') # actual data
                         #print(data[0])
@@ -287,12 +297,12 @@ class DataSession():
 			# value[0] ="id", value[1]= id, value[2]=md5sum
 
                         if value[2]==self.get_md5sum(data[0]): #md5sum is ok
-				print("md5sum matched "+value[1])
+				#print("md5sum matched "+value[1])
 
 				# Check if the chunk is already received and ignore it if necessary
 				if int(value[1]) in self.chunks_to_receive:
-
 					self.chunks_to_receive.remove(int(value[1]))
+
 				if self.failed_chunks.get(int(value[1]))==None:
                                 	pass
 				else:
@@ -310,7 +320,7 @@ class DataSession():
 				self.allocate_file(self.temp_file_path)
 				self.allocated = True		
 
-			self.construct_file(self.temp_file_path,value[1],data[0])
+			self.construct_file(self.temp_file_path,int(value[1]),data[0])
 
 			if self.transfer_status()==True:
 				print("done")
@@ -321,7 +331,7 @@ class DataSession():
 
 		elif packet.otype == OPERATION['DATA'] and packet.ocode == CODE['REQUEST']:
 
-			print("request received")
+			#print("request received")
 
 			data = packet.get_TLVlist('DATA')
 			#TODO: verify that file path (data[0]) is valid
@@ -356,7 +366,12 @@ class DataSession():
                 packet_to_send = OutPacket()
                 packet_to_send.create_packet(version=self.version, flags=[0],senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id, otype='BYE', ocode='REQUEST')
 
-		self.connection.send_packet_reliable(packet_to_send)
+		while True:
+                	status=self.connection.send_packet_reliable(packet_to_send)
+                        if status==True:
+                        	break
+
+		#self.connection.send_packet_reliable(packet_to_send)
 		#self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
 
         def bye_response(self):
@@ -364,7 +379,13 @@ class DataSession():
                 packet_to_send = OutPacket()
                 packet_to_send.create_packet(version=self.version, flags=[0],senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id, otype='BYE', ocode='RESPONSE')
 
-		self.connection.send_packet_reliable(packet_to_send)
+
+                while True:
+	                status=self.connection.send_packet_reliable(packet_to_send)
+                        if status==True:
+        	                break
+
+		#self.connection.send_packet_reliable(packet_to_send)
                 #self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
 
 
@@ -377,8 +398,12 @@ class DataSession():
                 packet_to_send.append_entry_to_TLVlist('DATA', self.file_path)
                 packet_to_send.append_entry_to_TLVlist('DATACONTROL', 'from?%d' % from_chunk +'?to?%d' %to_chunk)
 	
-		#print(packet_to_send)
-                self.connection.send_packet_reliable(packet_to_send)
+                while True:
+                	status=self.connection.send_packet_reliable(packet_to_send)
+                        if status==True:
+                        	 break
+
+		#self.connection.send_packet_reliable(packet_to_send)
 		#self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
 				
 
@@ -393,7 +418,26 @@ class DataSession():
 			packet_to_send.append_entry_to_TLVlist('DATA', chunk)
 			packet_to_send.append_entry_to_TLVlist('DATACONTROL','id?%d?' %x + self.get_md5sum(chunk))
 
-			self.connection.send_packet_reliable(packet_to_send)
+			received_packet = InPacket()
+
+			while True:
+ 				status=self.connection.send_packet_reliable(packet_to_send)
+				if status==True:
+        				break
+
+				try:
+					#print("trying to read")
+					#TODO: check & confirm session to be valid
+	                        	buffer, addr = self.connection.sock.recvfrom(2048)
+					received_packet.packetize_raw(buffer)
+					self.connection.receive_packet_start(received_packet)
+
+					#print buffer
+				except socket.error:
+					#print ("could not read")
+					pass
+
+
 			#self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
 			#time.sleep(0.01)
 	
@@ -473,8 +517,8 @@ class DataSession():
 				
 def main():
 
-    if len(sys.argv) == 6 and sys.argv[1] == "-s":
-        print 'Starting server'
+    if len(sys.argv) == 6 and sys.argv[1] == "-c":
+        print 'Starting client'
         client = True
         lport = 5000
         rport = 6000
@@ -482,35 +526,39 @@ def main():
         q = float(sys.argv[3])
         folder = sys.argv[4]
         sfolder = sys.argv[5]
-        f = 'dataconnection.tmp'
-        h = str(FileSystem.get_md5sum_hex(sfolder+f))
+        size = 5830917
+	f = 'testi/test.txt'
+	h = "d0cdb43bed5c4dcdaae6edc6e477a00a"
+        #h = str(FileSystem.get_md5sum_hex(sfolder+f))
         lses = 111
         rses = 222
-    elif len(sys.argv) == 5 and sys.argv[1] == "-c":
-        print 'Starting client'
+    elif len(sys.argv) == 5 and sys.argv[1] == "-s":
+        print 'Starting server'
         client = False
         lport = 6000
         rport = 5000
         p = float(sys.argv[2])
         q = float(sys.argv[3])
-        folder = '/tmp/'
-        size = int(sys.argv[4])
-        f = 'dataconnection.tmp'
-        subprocess.call(['dd', 'if=/dev/urandom', 'of=%s' % (folder+f), 'bs=%d' % size, 'count=1'])
-        h = str(FileSystem.get_md5sum_hex(folder+f))
-        lses = 222
+        folder = 'folder2'
+        #size = int(sys.argv[4])
+        size = 5830917
+	f = 'testi/test.txt'
+        #subprocess.call(['dd', 'if=/dev/urandom', 'of=%s' % (folder+f), 'bs=%d' % size, 'count=1'])
+        #h = str(FileSystem.get_md5sum_hex(folder+f))
+        h = "d0cdb43bed5c4dcdaae6edc6e477a00a"
+	lses = 222
         rses = 111
     else:
         sys.exit("Args: [server -s, or client -c] [p value] [q value] <folder for server> <filesize for client> <server's folder for client>")
 
     data_server = DataServer(folder,'0.0.0.0',lport)
     data_server.start()
-    data_server.add_port()
+    #data_server.add_port()
     #data_server.remove_port(4500)
 
-    port = data_server.get_port()
+    #port = data_server.get_port()
 
-    data_server.add_session('0.0.0.0', rport,lses,rses,1,10,f,h,573900,client)
+    data_server.add_session('0.0.0.0', rport,lses,rses,1,10,f,h,size,client)
 
     try:
         while True:
@@ -518,8 +566,8 @@ def main():
     except KeyboardInterrupt:
         print 'CTRL+C received, killing data server...'
         data_server.kill_server()
-        if client:
-            subprocess.call(['rm', '%s' % f])
+        #if client:
+            #subprocess.call(['rm', '%s' % f])
 
 	
 if __name__ == '__main__':

@@ -109,14 +109,15 @@ class Connection:
 
         if not wrapped_is_greater(packet.sequence, self.send_ack_no, self.max_seq) \
                 and packet.sequence != Connection.max_seq:
-            self.resend_send_ack = True
-
+	        self.resend_send_ack = True
+#	else:
+#		print("resend_send_ack=false")
         if packet.sequence != Connection.max_seq and \
                 packet.sequence == wrapped_plus(self.send_ack_no, 1, Connection.max_seq):
                 # Max seq reserved for unreliable transfer.
             # TODO We should not require packets to arrive in order.
             self.logger.debug("Expecting %d, got %d" % (wrapped_plus(self.send_ack_no, 1, Connection.max_seq),
-                packet.sequence))
+                packet.sequence)) #self.logger.debug(
             self.send_ack_no = packet.sequence
             ret = True
         else:

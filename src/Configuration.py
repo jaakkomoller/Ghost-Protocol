@@ -12,6 +12,7 @@ class Configuration():
     def __init__(self, args):
         self.logger = logging.getLogger("Configuration")
         self.param = args
+        self.passwd = ''
 
     def load_configuration(self):
         i=1
@@ -26,6 +27,8 @@ class Configuration():
                 self.q_prob = float(str(self.param[i+1]))
             elif str(self.param[i]) == '-f':
                 self.folder = str(self.param[i+1])
+            elif str(self.param[i]) == '-pw':
+                self.passwd = str(self.param[i+1])
             else:
                 temp_list.append(str(self.param[i]))
                 i-=1
@@ -84,7 +87,7 @@ class Configuration():
                 port = self.port
                 self.peers.append((peer,port))
 
-        return (self.port, self.folder, self.p_prob, self.q_prob,self.peers)
+        return (self.port, self.folder, self.p_prob, self.q_prob,self.peers, self.passwd)
 
     def load_password(self):
         pwd = getpass.getpass("Introduce user password: ")

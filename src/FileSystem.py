@@ -11,14 +11,10 @@ class FileSystem:
     def __init__(self,path, private_dir):
         self.logger = logging.getLogger("FileSystem")
         self.root_path = path
-        if private_dir.endswith('/'):
-            private_dir = private_dir[:-1]
+
         self.private_dir = private_dir
-        print "private_dir: ",private_dir
-        self.manifest_path = self.private_dir+'/'+'.manifest'
-        self.manifest_path_hash = self.private_dir+'/'+'.manifest_hash'
-        print "The manifest_path:", self.manifest_path
-        print "The manifest_path_hash:", self.manifest_path_hash
+        self.manifest_path = private_dir+'/'+'.manifest'
+        self.manifest_path_hash = private_dir+'/'+'.manifest_hash'
         self.set_private_folder()
         self.exit_flag = False
         self.thread_id = 0
@@ -84,7 +80,7 @@ class FileSystem:
                 self.write_manifest(self.current_dic)
                 #Update hash manifest
                 self.hash_manifest = FileSystem.get_md5sum_hex(self.manifest_path_hash, block_size=2**20)
-                print "hash_manifest:", self.hash_manifest
+                #print "hash_manifest:", self.hash_manifest
                 #Sleep for 1 second and detect changes
                 time.sleep(timeout)
 

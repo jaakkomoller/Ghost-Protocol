@@ -526,7 +526,7 @@ class LossySocket(object):
     bw_measurement_buffer = RingBuffer(100)
     count = 0
 
-    def __init__(self, af_family, protocol, q = 1.0, p = 0.0):
+    def __init__(self, af_family, protocol, q = 0.0, p = 0.0):
         self.socket = socket.socket(af_family, protocol)
         self.q = q
         self.p = p

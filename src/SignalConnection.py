@@ -23,7 +23,7 @@ class SignalServer(Thread):
 
     # TODO Throw error in case bind fails (Might do it already...)
     def __init__(self, fsystem, dataserver, ip = "0.0.0.0", port = 5500, sender_id = random.randint(0, 65535),
-            q = 1.0, p = 0.0):
+            q = 0.0, p = 0.0):
         Thread.__init__(self)
 
         # TODO Think trough how the program should exit

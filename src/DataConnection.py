@@ -76,7 +76,7 @@ class DataServer(Thread):
 			#Timeout
  			if len(self.read_list) == 0:
             			if self.kill_flag == True:
-					break
+					return
 				#TODO: remove old sessions
 				#TODO:check if we need to resend something				
 				
@@ -88,7 +88,7 @@ class DataServer(Thread):
 
 
                 #TODO: check socket (self.read_list[0])
-                connection = Connection(self.read_list[0], remote_ip, remote_port, local_session_id, remote_session_id,version, -1, 0 )
+                connection = Connection(self.read_list[0], remote_ip, remote_port, local_session_id, remote_session_id,version, 0, 1 )
 
 		data_session = DataSession(remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, md5sum, size, self.folder, connection, 0) 
 
@@ -176,7 +176,7 @@ class DataSession():
 
 	socket = None
 
-	chunk_size = 500.0  
+	chunk_size = 1000.0  
 	temp_file_path = None
 	allocated = False	
 	chunks_to_receive = []
@@ -286,9 +286,12 @@ class DataSession():
 			# value[0] ="id", value[1]= id, value[2]=md5sum
 
                         if value[2]==self.get_md5sum(data[0]): #md5sum is ok
-				print("md5sum matched")
-				#TODO: check if chunk is already received and then ignore it
-				self.chunks_to_receive.remove(int(value[1]))
+				print("md5sum matched "+value[1])
+
+				# Check if the chunk is already received and ignore it if necessary
+				if int(value[1]) in self.chunks_to_receive:
+
+					self.chunks_to_receive.remove(int(value[1]))
 				if self.failed_chunks.get(int(value[1]))==None:
                                 	pass
 				else:
@@ -374,8 +377,8 @@ class DataSession():
                 packet_to_send.append_entry_to_TLVlist('DATACONTROL', 'from?%d' % from_chunk +'?to?%d' %to_chunk)
 	
 		#print(packet_to_send)
-                #self.connection.send_packet_reliable(packet_to_send)
-		self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
+                self.connection.send_packet_reliable(packet_to_send)
+		#self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
 				
 
         def data_response(self,from_chunk, to_chunk):
@@ -389,9 +392,9 @@ class DataSession():
 			packet_to_send.append_entry_to_TLVlist('DATA', chunk)
 			packet_to_send.append_entry_to_TLVlist('DATACONTROL','id?%d?' %x + self.get_md5sum(chunk))
 
-			#self.connection.send_packet_reliable(packet_to_send)
-			self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
-			time.sleep(0.01)
+			self.connection.send_packet_reliable(packet_to_send)
+			#self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
+			#time.sleep(0.01)
 	
 	def ensure_folder_structure(self,file_path):
     		d = os.path.dirname(self.folder+"/"+file_path)

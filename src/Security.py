@@ -63,7 +63,7 @@ class Security:
     def export_key(self, key):
         return key.exportKey()
     
-    def encrypt(self, key, data,chunksize=0, nbytes=0):
+    def encrypt(self, key, data,chunksize=32, nbytes=0):
         ciphertext = ''
         i = 0
         a = 0
@@ -71,14 +71,14 @@ class Security:
         for i in range(0,len(data)/chunksize):
             a = i*chunksize
             b = a+chunksize
-            ciphertext += key.encrypt(data[a:b], self.cryptoMode)[0]
+            s = key.encrypt(data[a:b],self.cryptoMode)[0]
+            ciphertext += s
         if b < len(data):
-            ciphertext += key.encrypt(data[b:], self.cryptoMode)[0]
-        
+            s = key.encrypt(data[b:],self.cryptoMode)[0]
+            ciphertext += s
         return ciphertext[nbytes:]
-        #return key.encrypt(data[nbytes:], self.cryptoMode)[0]
     
-    def decrypt(self, key, data,chunksize=0, nbytes=0):
+    def decrypt(self, key, data,chunksize=128, nbytes=0):
         ciphertext = ''
         i = 0
         a = 0
@@ -86,12 +86,12 @@ class Security:
         for i in range(0,len(data)/chunksize):
             a = i*chunksize
             b = a+chunksize
-            ciphertext += key.decrypt(data[a:b])
+            s = key.decrypt(data[a:b])
+            ciphertext += s
         if b < len(data):
-            ciphertext += key.decrypt(data[b:])
-        
+            s = key.decrypt(data[b:])
+            ciphertext += s
         return ciphertext[nbytes:]
-        #return key.decrypt(data[nbytes:])
     
     #Different values for key and password
     def calculate_key_hash(self, key, pwd):

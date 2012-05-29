@@ -1,14 +1,23 @@
 import hashlib, logging
 from Crypto.PublicKey import RSA
+from Crypto.Cipher import AES
 from Crypto import Cipher
 from Crypto import Random
 
+import base64
+import os
 
 class Security:
     def __init__(self):
         self.logger = logging.getLogger("Crypto/Security")
         #Select a model: http://en.wikipedia.org/wiki/Block_cipher_modes_of_operation
         self.cryptoMode = Cipher.AES.MODE_CBC
+        # the block size for the cipher object; must be 16, 24, or 32 for AES
+        self.BLOCK_SIZE = 32
+        # the character used for padding--with a block cipher such as AES, the value
+        # you encrypt must be a multiple of BLOCK_SIZE in length.  This character is
+        # used to ensure that your value is always a multiple of BLOCK_SIZE
+        self.PADDING = '{'
     
     def set_cryptoMode(self, mode):
         self.cryptoMode = mode
@@ -25,14 +34,28 @@ class Security:
         cipher = AES.new(key, AES.MODE_CFB, iv)
         return (iv,key,cipher)
     
-    def encrypt_sharedkey(self,iv,cipher,data):
-        msg = iv + cipher.encrypt(str(data))
-        return msg
-    
-    def decrypt_sharedkey(self,iv,cipher,data):
-        msg = cipher.decrypt(data)[len(iv):]
+    def generate_key_AES(self):
+        # one-liner to sufficiently pad the text to be encrypted
+        pad = lambda s: s + (self.BLOCK_SIZE - len(s) % self.BLOCK_SIZE) * self.PADDING
         
+        # one-liners to encrypt/encode and decrypt/decode a string
+        # encrypt with AES, encode with base64
+        self.EncodeAES = lambda c, s: base64.b64encode(c.encrypt(pad(s)))
+        self.DecodeAES = lambda c, e: c.decrypt(base64.b64decode(e)).rstrip(self.PADDING)
+        
+        # generate a random secret key
+        secret = os.urandom(self.BLOCK_SIZE)
+        
+        # create a cipher object using the random secret
+        cipher = AES.new(secret)
+        return cipher
     
+    def encrypt_AES(self,cipher,data):
+        return self.EncodeAES(cipher, data)
+    
+    def decrypt_AES(self,cipher,data):
+        return self.DecodeAES(cipher, data)
+        
     def import_key(self, plaintextkey):
         return RSA.importKey(plaintextkey)
     

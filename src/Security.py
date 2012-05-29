@@ -1,11 +1,7 @@
-import hashlib, logging
+import base64, hashlib, logging, os
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import AES
 from Crypto import Cipher
-from Crypto import Random
-
-import base64
-import os
 
 class Security:
     def __init__(self):
@@ -18,51 +14,45 @@ class Security:
         # you encrypt must be a multiple of BLOCK_SIZE in length.  This character is
         # used to ensure that your value is always a multiple of BLOCK_SIZE
         self.PADDING = '{'
-    
+
     def set_cryptoMode(self, mode):
         self.cryptoMode = mode
-        
+
     def generate_keys(self, nbits):
         #Generates a set of private/public key
         privateKey = RSA.generate(nbits)
         publicKey = privateKey.publickey()
         return (privateKey, publicKey)
-    
-    def generate_sharedkey(self):
-        iv = Random.new().read(AES.block_size)
-        key = Random.new().read(AES.block_size)
-        cipher = AES.new(key, AES.MODE_CFB, iv)
-        return (iv,key,cipher)
-    
+
     def generate_key_AES(self, secret = None):
         # one-liner to sufficiently pad the text to be encrypted
         pad = lambda s: s + (self.BLOCK_SIZE - len(s) % self.BLOCK_SIZE) * self.PADDING
-        
+
         # one-liners to encrypt/encode and decrypt/decode a string
         # encrypt with AES, encode with base64
         self.EncodeAES = lambda c, s: base64.b64encode(c.encrypt(pad(s)))
         self.DecodeAES = lambda c, e: c.decrypt(base64.b64decode(e)).rstrip(self.PADDING)
-        
+
         # generate a random secret key
         if secret is None:
             secret = os.urandom(self.BLOCK_SIZE)
-        
+
         # create a cipher object using the random secret
         cipher = AES.new(secret)
         return (cipher,secret)
-    
+
     def encrypt_AES(self,cipher,data,nbytes):
         return data[:nbytes] + self.EncodeAES(cipher, data[nbytes:])
-    
+
     def decrypt_AES(self,cipher,data,nbytes):
         return data[:nbytes] + self.EncodeAES(cipher, data[nbytes:])
-        
+
     def import_key(self, plaintextkey):
         return RSA.importKey(plaintextkey)
-    
+
     def export_key(self, key):
         return key.exportKey()
-    
+
     def encrypt(self, key, data,chunksize=32, nbytes=0):
         ciphertext = ''
         i = 0
@@ -77,7 +67,7 @@ class Security:
             s = key.encrypt(data[b:],self.cryptoMode)[0]
             ciphertext += s
         return ciphertext[nbytes:]
-    
+
     def decrypt(self, key, data,chunksize=128, nbytes=0):
         ciphertext = ''
         i = 0
@@ -92,18 +82,17 @@ class Security:
             s = key.decrypt(data[b:])
             ciphertext += s
         return ciphertext[nbytes:]
-    
+
     #Different values for key and password
     def calculate_key_hash(self, key, pwd):
         md5 = hashlib.md5()
         md5.update(key)
         md5.update(pwd)
         return md5.hexdigest()
-    
+
     #Values is a list of elements to calculate the hash from
     def get_md5sum_hex(self, values):
         md5 = hashlib.md5()
         for item in values:
             md5.update(item)
         return md5.hexdigest()
-    

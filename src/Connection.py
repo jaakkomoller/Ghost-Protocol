@@ -272,8 +272,7 @@ class Connection:
         
         packet.send_time = time.time()
         self.resend_send_ack = False
-	print(packet)
-	print packet.build_packet()
+
         self.sock.sendto(packet.build_packet(), (self.remote_ip, self.remote_port), resend, packet.sequence)
     
     def no_ack_timeout(self):

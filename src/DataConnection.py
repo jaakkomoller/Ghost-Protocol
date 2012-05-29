@@ -13,6 +13,7 @@ class DataServer(Thread):
 	port_list = [] # port, socket
 	read_list = [] # contains all the sockets for select
 	session_list = []
+	kill_flag = False
 
 	def __init__(self, folder, ip = "", port = ""):
 		Thread.__init__(self)
@@ -26,7 +27,7 @@ class DataServer(Thread):
 		self.logger = logging.getLogger("Data server started: ip %s, port %s" % (ip,port))
 
 		try:
-	      		self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+	      		self.sock = LossySocket(socket.AF_INET, socket.SOCK_DGRAM,0,0)
 			self.sock.bind((ip, port))
 			self.sock.setblocking(0) # non-blocking
 			self.port_list.append([port,self.sock])
@@ -53,13 +54,18 @@ class DataServer(Thread):
 			           	
 	 					try:
 							buffer, addr = r.recvfrom(self.buffer_size)
-
 							self.received_packet.packetize_raw(buffer)
-							self.received_packet.receive_time = time.time()
 
 							for session in self.session_list:
 
 								if self.received_packet.txremoteID == session.local_session_id and self.received_packet.txlocalID == session.remote_session_id:
+
+									#TODO: receive-> start & end
+                                                        		session.connection.receive_packet_start(self.received_packet)
+                                                        		session.connection.receive_packet_end(self.received_packet,session.sender_id)
+                                                        		#TODO: Check socket
+
+
 									session.handle(self.received_packet)
 
 
@@ -67,15 +73,30 @@ class DataServer(Thread):
 							self.logger.alarm("Error with socket")
 
 
-			#TODO: timeout
+			#Timeout
+ 			if len(self.read_list) == 0:
+            			if self.kill_flag == True:
+					break
+				#TODO: remove old sessions
+				#TODO:check if we need to resend something				
+				
 
+	def kill_server(self):
+		self.kill_flag=True	
 
 	def add_session(self, remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, md5sum, size, is_request):
 
-		data_session = DataSession(remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, md5sum, size, self.folder, False) 
+
+                #TODO: check socket (self.read_list[0])
+                connection = Connection(self.read_list[0], remote_ip, remote_port, local_session_id, remote_session_id,version, -1, 0 )
+
+		data_session = DataSession(remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, md5sum, size, self.folder, connection, 0) 
+
+
 		fail = False
 		for session in self.session_list:
 
+			#TODO: move this
 			if session.status==1 or session.status==2:
 				self.session_list.remove(session)	
 			
@@ -153,16 +174,16 @@ class DataServer(Thread):
 
 class DataSession():
 
-	socket = None
+	#socket = None
 
-	chunk_size = 1000.0  
+	chunk_size = 500.0  
 	temp_file_path = None
 	allocated = False	
 	chunks_to_receive = []
 	failed_chunks = {}
 	#status: 0 = processing, 1 = ready, 2 = failed
 
-	def __init__(self, remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, md5sum, size, folder, status=0):
+	def __init__(self, remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, md5sum, size, folder, connection, status=0):
 
 		self.remote_ip = remote_ip
 		self.remote_port = remote_port
@@ -178,9 +199,10 @@ class DataSession():
 		#a temp file location
 		self.temp_file_path = self.folder+"/.private/file_"+str(self.local_session_id)+str(self.remote_session_id)+str(self.sender_id)+".temp"
 		self.initialize_transfer()		
-
-		#TODO: use a server socket
+		self.connection=connection
+		
 		self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
 
 	def initialize_transfer(self): 
 		max = self.get_chunk_count()
@@ -225,7 +247,8 @@ class DataSession():
 			for chunk in self.failed_chunks.itervalues():
 		                packet_to_send.append_entry_to_TLVlist('DATACONTROL', 'from?%d' %chunk +'?to?%d' %chunk)
 
-                	self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
+			self.connection.send_packet_reliable(packet_to_send)
+                	#self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
 
 		
 
@@ -251,7 +274,7 @@ class DataSession():
 
 		elif packet.otype == OPERATION['DATA'] and packet.ocode == CODE['RESPONSE']:	
 
-#			print("response received")			
+			print("response received")			
 	
 			tlvlist = packet.get_TLVlist('DATA') # actual data
                         #print(tlvlist[0])
@@ -297,7 +320,7 @@ class DataSession():
 			print("request received")
 
 			tlvlist = packet.get_TLVlist('DATA')
-
+			#TODO: verify that file pat is valid
 
                         tlvlist = packet.get_TLVlist('DATACONTROL')
                         for tlv in tlvlist:
@@ -329,14 +352,16 @@ class DataSession():
                 packet_to_send = OutPacket()
                 packet_to_send.create_packet(version=self.version, flags=[0],senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id,sequence=0, otype='BYE', ocode='REQUEST')
 
-		self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
+		self.connection.send_packet_reliable(packet_to_send)
+		#self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
 
         def bye_response(self):
 
                 packet_to_send = OutPacket()
                 packet_to_send.create_packet(version=self.version, flags=[0],senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id,sequence=0, otype='BYE', ocode='RESPONSE')
 
-                self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
+		self.connection.send_packet_reliable(packet_to_send)
+                #self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
 
 
 
@@ -344,12 +369,13 @@ class DataSession():
         def data_req(self,from_chunk,to_chunk):
 
                 packet_to_send = OutPacket()
-                packet_to_send.create_packet(version=self.version, flags=[0],senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id,sequence=0, otype='DATA', ocode='REQUEST')
+                packet_to_send.create_packet(version=self.version, flags=[0],senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id, sequence=0, otype='DATA', ocode='REQUEST')
                 packet_to_send.append_entry_to_TLVlist('DATA', self.file_path)
                 packet_to_send.append_entry_to_TLVlist('DATACONTROL', 'from?%d' % from_chunk +'?to?%d' %to_chunk)
-
-               
-		self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
+	
+		#print(packet_to_send)
+                self.connection.send_packet_reliable(packet_to_send)
+		#self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
 				
 
         def data_response(self,from_chunk, to_chunk):
@@ -363,8 +389,9 @@ class DataSession():
 			packet_to_send.append_entry_to_TLVlist('DATA', chunk)
 			packet_to_send.append_entry_to_TLVlist('DATACONTROL',self.get_md5sum(chunk))
 
-			self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
-			time.sleep(0.01)
+			self.connection.send_packet_reliable(packet_to_send)
+			#self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
+			#time.sleep(0.01)
 	
 	def ensure_folder_structure(self,file_path):
     		d = os.path.dirname(self.folder+"/"+file_path)
@@ -413,7 +440,7 @@ class DataSession():
 
 
 	def get_size(self):
-        	return os.path.getsize(self.file_path)
+        	return os.path.getsize(self.folder+"/"+self.file_path)
 
 
 	def allocate_file(self,new_file):
@@ -452,4 +479,5 @@ def main():
 	data_server.add_session('0.0.0.0', 4502,111,222,1,10,'testi/7z920-arm.exe',"bf5ef3508df8b20a514dfb116e76ceaf",573900,True)
 
 	
-main()
+if __name__ == '__main__':
+    main()

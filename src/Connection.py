@@ -1,4 +1,5 @@
 import logging, socket, signal, sys, time, random, thread, struct
+from Security import *
 from threading import Thread
 
 from PacketManager import *
@@ -67,7 +68,8 @@ class Connection:
     def __init__(self, sock, remote_ip, remote_port, local_session_id, remote_session_id = 0,
             version = 1, send_ack_no = random.randint(0, max_seq-1),
             seq_no = random.randint(0, max_seq-1),
-            rtt = init_rtt, logger_str = "Connection to", local_cong_window = 10, remote_window = 10):
+            rtt = init_rtt, logger_str = "Connection to", local_cong_window = 10, remote_window = 10,
+            use_enc = False, peer_key = '', private_key = '', public_key = '', security = None):
         self.sock = sock     # Pointer to server socket
         self.version = version
         self.remote_ip = remote_ip
@@ -102,6 +104,13 @@ class Connection:
         self.local_cong_window = local_cong_window
         self.last_packet_recv_time = -1 # Last time a packet was received
 
+        self.use_enc = use_enc
+        self.peer_key = peer_key
+        self.private_key = private_key
+        self.public_key = public_key
+        self.security = security
+
+
     def receive_packet_start(self, packet):
         start = time.time()
         self.sync.acquire()
@@ -109,15 +118,14 @@ class Connection:
 
         if not wrapped_is_greater(packet.sequence, self.send_ack_no, self.max_seq) \
                 and packet.sequence != Connection.max_seq:
-	        self.resend_send_ack = True
-#	else:
-#		print("resend_send_ack=false")
+            self.resend_send_ack = True
+
         if packet.sequence != Connection.max_seq and \
                 packet.sequence == wrapped_plus(self.send_ack_no, 1, Connection.max_seq):
                 # Max seq reserved for unreliable transfer.
             # TODO We should not require packets to arrive in order.
             self.logger.debug("Expecting %d, got %d" % (wrapped_plus(self.send_ack_no, 1, Connection.max_seq),
-                packet.sequence)) #self.logger.debug(
+                packet.sequence))
             self.send_ack_no = packet.sequence
             ret = True
         else:
@@ -216,7 +224,7 @@ class Connection:
                 sequence=self.seq_no, ack=self.send_ack_no, otype='UPDATE', ocode='RESPONSE')
             self.send_packet_unreliable(packet_to_send)
     
-    def send_packet_reliable(self, packet):
+    def send_packet_reliable(self, packet, no_enc = False):
         start = time.time()
         self.sync.acquire()
         if self.local_send_window == 0:
@@ -226,7 +234,7 @@ class Connection:
         
         packet.sequence = self.seq_no
 
-        self.__send_out(packet)
+        self.__send_out(packet, no_enc = no_enc)
 
         self.seq_no = self.seq_no_plus(1)
         self.logger.debug('seq no set to %d' % self.seq_no)
@@ -248,7 +256,7 @@ class Connection:
         debug.send_r_process_time += time.time() - start
         return True
 
-    def send_packet_unreliable(self, packet, syn_ack = False):
+    def send_packet_unreliable(self, packet, syn_ack = False, no_enc = False):
         start = time.time()
         self.sync.acquire()
 
@@ -258,7 +266,7 @@ class Connection:
         else:
             packet.sequence = self.seq_no
 
-        self.__send_out(packet)
+        self.__send_out(packet, no_enc = no_enc)
 
         if syn_ack:
             self.seq_no = self.seq_no_plus(1)
@@ -267,8 +275,7 @@ class Connection:
         self.sync.release()
         debug.send_unr_process_time += time.time() - start
     
-    def __send_out(self, packet, resend = False):
-
+    def __send_out(self, packet, resend = False, no_enc = False):
         packet.ack = self.send_ack_no
         
         packet.purge_tlvs(ttype = 'TXCONTROL')
@@ -293,9 +300,19 @@ class Connection:
         
         packet.send_time = time.time()
         self.resend_send_ack = False
-#        print(packet)
+#       print(packet)
 #       print packet.build_packet()
-        self.sock.sendto(packet.build_packet(), (self.remote_ip, self.remote_port), resend, packet.sequence)
+        if self.use_enc and not no_enc and not packet.no_enc:
+            packet.flag_list.append('CRY')
+            bpacket = self.security.encrypt_AES(self.aes_key, packet.build_packet(), 8)
+            #data2 = self.security.decrypt_AES(self.aes_key, bpacket, 8)
+            #packet2 = OutPacket()
+            #packet2.packetize_raw(data2)
+            #if packet.build_packet() != packet2.build_packet():
+            #    exit('Mismatch')
+        else:
+            bpacket = packet.build_packet()
+        self.sock.sendto(bpacket, (self.remote_ip, self.remote_port), resend, packet.sequence)
     
     def no_ack_timeout(self):
         if not self.unack_queue:

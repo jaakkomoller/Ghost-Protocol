@@ -1,4 +1,5 @@
 import logging, socket, signal, sys, time, random
+from Security import *
 from threading import Thread
 
 from PacketManager import *
@@ -23,7 +24,7 @@ class SignalServer(Thread):
 
     # TODO Throw error in case bind fails (Might do it already...)
     def __init__(self, fsystem, dataserver, ip = "0.0.0.0", port = 5500, sender_id = random.randint(0, 65535),
-            q = 0.0, p = 0.0):
+            q = 0.0, p = 0.0, passwd = ''):
         Thread.__init__(self)
 
         # TODO Think trough how the program should exit
@@ -42,6 +43,21 @@ class SignalServer(Thread):
 
         self.received_packet = InPacket()
         self.connection_list_lock = thread.allocate_lock()
+
+        self.passwd = passwd
+        if len(passwd) != 0:
+            self.use_enc = True
+            self.security = Security()
+            self.privateKey,self.publicKey = self.security.generate_keys(1024)
+            self.publicKey_plaintext = self.security.export_key(self.publicKey)
+            self.key_hash = self.security.calculate_key_hash(self.publicKey_plaintext, passwd)
+        else:
+            self.use_enc = False
+            self.security = None
+            self.privateKey,self.publicKey = None, None
+            self.publicKey_plaintext = ''
+            self.key_hash = ''
+
 
 
     def run(self):
@@ -63,33 +79,49 @@ class SignalServer(Thread):
                     continue
                 else:
                     self.logger.alarm("error with socket")
-            self.received_packet.packetize_raw(data)
+            if self.use_enc:
+                packet_ok = self.received_packet.packetize_header(data)
+            else:
+                packet_ok = self.received_packet.packetize_raw(data)
+
             self.received_packet.receive_time = time.time()
-            self.logger.info("received packet:\n%s" % str(self.received_packet))
             found = False
             self.connection_list_lock.acquire()
             for connection in self.connection_list:
                 if self.received_packet.txremoteID == connection.local_session_id:
                     self.logger.info("packet belongs to existing connection. processing...")
-                    connection.handle(self.received_packet)
                     found = True
+                    if self.use_enc and connection.state == SignalConnection.State.CONNECTED and 'CRY' in self.received_packet.get_flags():
+                        data = self.security.decrypt_AES(connection.aes_key, data, 8)
+                    packet_ok = self.received_packet.packetize_raw(data)
+                    self.logger.info("received packet:\n%s" % str(self.received_packet))
+                    if not packet_ok:
+                        self.logger.warning("Decrypted packet is not valid.")
+                        break
+                    connection.handle(self.received_packet)
                     break
-            if not found and self.received_packet.otype == OPERATION['HELLO'] and \
-                    self.received_packet.ocode == CODE['REQUEST'] :
-                connection = SignalConnection(server = self, remote_ip = addr[0], remote_port = addr[1], 
-                    local_session_id = self.get_new_session_id(random.randint(0, 65535)),
-                    remote_session_id = self.received_packet.txlocalID,
-                    version = self.received_packet.version,
-                    send_ack_no = self.received_packet.sequence,
-                    seq_no = random.randint(0, 65535),
-                    updatetime = self.updatetime)
+            if not found:
+                if self.use_enc:
+                    packet_ok = self.received_packet.packetize_raw(data)
+                self.logger.info("received packet:\n%s" % str(self.received_packet))
+                if packet_ok and self.received_packet.otype == OPERATION['HELLO'] and \
+                        self.received_packet.ocode == CODE['REQUEST']:
+                    connection = SignalConnection(server = self, remote_ip = addr[0], remote_port = addr[1], 
+                        local_session_id = self.get_new_session_id(random.randint(0, 65535)),
+                        remote_session_id = self.received_packet.txlocalID,
+                        version = self.received_packet.version,
+                        send_ack_no = self.received_packet.sequence,
+                        seq_no = random.randint(0, 65535),
+                        updatetime = self.updatetime)
     #def __init__(self, server, remote_ip, remote_port, local_session_id, remote_session_id = 0,
     #        version = 1, send_ack_no = random.randint(0, 65534), seq_no = random.randint(0, 65535)):
-                connection.hello_recv(self.received_packet)
-                self.connection_list.append(connection)
-                self.logger.info("hello packet received, new connection established\
+                    connection.hello_recv(self.received_packet)
+                    self.connection_list.append(connection)
+                    self.logger.info("hello packet received, new connection established\
 (local id %d, remote id %d) and HELLO sent" % (connection.local_session_id, connection.remote_session_id))
-            elif not found:
+                elif not packet_ok:
+                    self.logger.warning("Packet is not valid.")
+            elif not found and packet_ok:
                 self.logger.info("Packet does not belong to any connection and not a valid HELLO. Discarding.")
             self.logger.info("done with packet.\n")
             for i, connection in enumerate(self.connection_list):
@@ -144,35 +176,70 @@ class SignalConnection(Connection):
             updatetime = 5):
         Connection.__init__(self, sock = server.sock, remote_ip = remote_ip, remote_port = remote_port,
             local_session_id = local_session_id, remote_session_id = remote_session_id,
-            version = version, send_ack_no = send_ack_no, seq_no = seq_no, logger_str = "Signal Connection to ")
+            version = version, send_ack_no = send_ack_no, seq_no = seq_no, logger_str = "Signal Connection to ",
+            use_enc = server.use_enc, private_key = server.privateKey, public_key = server.publicKey,
+            security = server.security)
         self.server = server
         self.logger.info("Initializing signal connection to %s:%i at %s" % (self.remote_ip, self.remote_port, str(time.time())))
         self.state = SignalConnection.State.UNCONNECTED
 
         self.last_update = time.time() # Marks the time of last sent update request
         self.updatetime = updatetime
+        self.peer_key = None
 
     def connect(self):
         #def create_packet(self, version=1, flags=[], senderID=0, txlocalID=0, txremoteID=0,
 #     sequence=0, ack=0, otype=0, ocode=0, TLVlist=None, rawdata=None):
         # Packet manager should be able to build hello packets (i.e. set remote session id)
-        packet_to_send = OutPacket()
-        packet_to_send.create_packet(version=self.version, flags=[], senderID=self.server.sender_id,
+        packet_to_send = OutPacket(no_enc = True)
+        if self.server.use_enc:
+            flags = ['SEC']
+        else:
+            flags = []
+        packet_to_send.create_packet(version=self.version, flags=flags, senderID=self.server.sender_id,
             txlocalID=self.local_session_id, txremoteID=0, sequence=self.seq_no, otype='HELLO',
             ocode='REQUEST')
-        self.send_packet_reliable(packet_to_send)
+        if self.server.use_enc:
+            packet_to_send.append_entry_to_TLVlist('SECURITY', self.server.publicKey_plaintext+'?'+self.server.key_hash)
+        self.send_packet_reliable(packet_to_send, no_enc = True)
         self.state = SignalConnection.State.HELLO_SENT
         # TODO set timers
 
     def hello_recv(self, packet):
         self.receive_packet_start(packet)
-        packet_to_send = OutPacket()
+
+        if 'SEC' in packet.get_flags() and self.server.use_enc:
+            security_payload = packet.get_TLVlist('SECURITY')
+            recovered_plaintextkey = security_payload[0].split('?')[0]
+            recovered_hash = security_payload[0].split('?')[1]
+            if self.security.calculate_key_hash(recovered_plaintextkey, self.server.passwd) == recovered_hash:
+                print 'Hash ok'
+                self.peer_key = self.security.import_key(recovered_plaintextkey)
+            else:
+                print 'Incorrect password, %s, %s' % (recovered_hash, self.server.key_hash)
+                return False
+        elif 'SEC' not in packet.get_flags() and self.server.use_enc == True:
+            print 'Peer does not support security'
+            return False
+        elif 'SEC' in packet.get_flags() and self.server.use_enc == False:
+            print 'Peer requires security. Security not enabled.'
+            return False
+
+        if self.server.use_enc:
+            flags = ['SEC']
+        else:
+            flags = []
+        
+        packet_to_send = OutPacket(no_enc = True)
         self.send_ack_no = packet.sequence
-        packet_to_send.create_packet(version=self.version, flags=[], senderID=self.server.sender_id,
+        packet_to_send.create_packet(version=self.version, flags=flags, senderID=self.server.sender_id,
             txlocalID=self.local_session_id, txremoteID=self.remote_session_id, sequence=self.seq_no,
             ack=self.send_ack_no, otype='HELLO', ocode='RESPONSE')  
-        self.send_packet_unreliable(packet_to_send, syn_ack = True)
+        if self.server.use_enc:
+            packet_to_send.append_entry_to_TLVlist('SECURITY', self.server.publicKey_plaintext+'?'+self.server.key_hash)
+        self.send_packet_unreliable(packet_to_send, syn_ack = True, no_enc = True)
         self.state = SignalConnection.State.HELLO_RECVD
+        return True
         # TODO set timers
     
     def handle(self, packet):
@@ -183,17 +250,55 @@ class SignalConnection(Connection):
             self.logger.info('HELLO response received while status == HELLO_SENT')
             self.remote_session_id = packet.txlocalID
             self.send_ack_no = packet.sequence
-            packet_to_send = OutPacket()
-            packet_to_send.create_packet(version=self.version, flags=[], senderID=self.server.sender_id,
+            
+            if 'SEC' in packet.get_flags() and self.server.use_enc:
+                security_payload = packet.get_TLVlist('SECURITY')
+                recovered_plaintextkey = security_payload[0].split('?')[0]
+                recovered_hash = security_payload[0].split('?')[1]
+                if self.security.calculate_key_hash(recovered_plaintextkey, self.server.passwd) == recovered_hash:
+                    print 'Hash ok'
+                    self.peer_key = self.security.import_key(recovered_plaintextkey)
+                    self.aes_key, secret = self.security.generate_key_AES()
+                else:
+                    print 'Incorrect password'
+                    return False
+            elif 'SEC' not in packet.get_flags() and self.server.use_enc == True:
+                print 'Peer does not support security'
+                return False
+            elif 'SEC' in packet.get_flags() and self.server.use_enc == False:
+                print 'Peer requires security. Security not enabled.'
+                return False
+
+            if self.server.use_enc:
+                flags = ['ACK', 'SEC']
+            else:
+                flags = ['ACK']
+
+            packet_to_send = OutPacket(no_enc = True)
+            packet_to_send.create_packet(version=self.version, flags=flags, senderID=self.server.sender_id,
                 txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
                 sequence=self.seq_no, ack=self.send_ack_no, otype='HELLO', ocode='RESPONSE')  
+            if self.server.use_enc:
+                print '** secret '
+                PacketManager.hex_data(secret)
+                encrypted = self.security.encrypt(self.peer_key, secret)
+                PacketManager.hex_data(encrypted)
+                packet_to_send.append_entry_to_TLVlist('SECURITY', encrypted)
             # TODO set remote sender id and ack no
-            self.send_packet_reliable(packet_to_send)
+            self.send_packet_reliable(packet_to_send, no_enc = True)
             self.state = SignalConnection.State.CONNECTED
             self.logger.info('state set to connected')
         elif packet.otype == OPERATION['HELLO'] and packet.ocode == CODE['RESPONSE'] and \
-                self.state == SignalConnection.State.HELLO_RECVD and packet.ack == self.seq_no_minus(1):
+                self.state == SignalConnection.State.HELLO_RECVD and packet.ack == self.seq_no_minus(1) and \
+                'ACK' in packet.get_flags():
             self.logger.info('HELLO response received while status == HELLO_RECVD')
+            if 'SEC' in packet.get_flags() and self.server.use_enc:
+                security_payload = packet.get_TLVlist('SECURITY')
+                enc_secret = security_payload[0]
+                peer_secret = self.security.decrypt(self.server.privateKey, enc_secret)
+                self.aes_key = self.security.generate_key_AES(peer_secret)[0]
+                print '** secret '
+                PacketManager.hex_data(peer_secret)
             self.state = SignalConnection.State.CONNECTED
             self.logger.info('state set to connected')
             self.send_update('REQUEST')
@@ -440,7 +545,7 @@ def main():
     dataserver.add_port()
     server = SignalServer(fsystem = fsystem, dataserver = dataserver, port = int(port),
         sender_id = random.randint(0, 65535),
-        q = q_prob, p = p_prob)
+        q = q_prob, p = p_prob, passwd = config.load_password())
 
     server.init_connections(peers)
     server.start()

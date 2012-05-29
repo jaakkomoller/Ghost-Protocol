@@ -42,6 +42,8 @@ class Security:
     def encrypt(self, key, data,chunksize=0, nbytes=0):
         ciphertext = ''
         i = 0
+        a = 0
+        b = 0
         for i in range(0,len(data)/chunksize):
             a = i*chunksize
             b = a+chunksize
@@ -55,6 +57,8 @@ class Security:
     def decrypt(self, key, data,chunksize=0, nbytes=0):
         ciphertext = ''
         i = 0
+        a = 0
+        b = 0
         for i in range(0,len(data)/chunksize):
             a = i*chunksize
             b = a+chunksize

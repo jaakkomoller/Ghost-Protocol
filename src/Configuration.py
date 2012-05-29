@@ -1,4 +1,4 @@
-import logging, os
+import logging, getpass, os
 
 class Configuration():
     param = 0
@@ -84,3 +84,7 @@ class Configuration():
             
         return (self.port, self.folder, self.p_prob, self.q_prob,self.peers)
 
+    def load_password(self):
+        pwd = getpass.getpass("Introduce user password: ")
+        print "The password introduced is: ", pwd
+        return pwd

@@ -17,8 +17,8 @@ OPERATION = {'HELLO':1, 'UPDATE':2, 'LIST':3, 'PULL':4, 'DATA':5, 'BYE':6}
 CODE = {'REQUEST':1, 'RESPONSE':2}
 REV_OPERATION = {1:'HELLO', 2:'UPDATE', 3:'LIST', 4:'PULL', 5:'DATA', 6:'BYE'}
 REV_CODE = {1:'REQUEST', 2:'RESPONSE'}
-FLAG = {'ACK':1, 'URG':2, 'ECN':4, 'SEC':8}     #Not YET in use
-FLAG_REV = {1:'ACK', 2:'URG', 4:'ECN', 8:'SEC'} #Not YET in use
+#FLAG = {'ACK':1, 'URG':2, 'ECN':4, 'SEC':8}     #Not YET in use
+#FLAG_REV = {1:'ACK', 2:'URG', 4:'ECN', 8:'SEC'} #Not YET in use
 
 class PacketManager():
     def __init__(self):
@@ -187,6 +187,12 @@ class PacketManager():
             #tmplist.append((RAWTLVTYPE[item[0]],item[2]))
             if tlvtype == "" or TLVTYPE[tlvtype] == item[0]:
                 tmplist.append(item[2])
+        return tmplist
+    
+    def get_TLVlist_typevalue(self):
+        tmplist = []
+        for item in self.TLVs:
+            tmplist.append((RAWTLVTYPE[item[0]],item[2]))
         return tmplist
             
 

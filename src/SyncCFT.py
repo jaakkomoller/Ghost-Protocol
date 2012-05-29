@@ -22,6 +22,8 @@ class SyncCFT:
         config = Configuration(sys.argv)
         
         conf_values = config.load_configuration()
+        self.local_password = config.load_password()
+        
         if not conf_values:
             self.logger.error("An error occurred while loading the configuration!")
             return
@@ -39,11 +41,13 @@ class SyncCFT:
             i+=1
 
     def start_SyncCFT(self):
-        
-        self.fsystem = FileSystem(self.folder, '.private')
         self.packetmanager = PacketManager()
         self.security = Security()
+        self.fsystem = FileSystem(self.folder, '.private')
         
+        (self.privateKey,self.publicKey) = self.security.generate_keys(1024)
+        self.publicKey_plaintext = self.security.export_key(self.publicKey)
+
         self.fsystem.start_thread()
         
         try:
@@ -60,28 +64,32 @@ class SyncCFT:
         print "\n++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++"
         
         print self.fsystem.current_dic
-           
+        
         self.fsystem.terminate_thread()
 
+        pwdA= 'passwordA'
+        (privateKA,publicKA) = self.security.generate_keys(1024)
+        exp_publicKA = self.security.export_key(publicKA)
+        hash_A = self.security.calculate_key_hash(exp_publicKA, pwdA)
+        
+        #(privateKB,publicKB) = self.security.generate_keys(1024)
         
         print "Creating the packet..."
-        self.packetmanager.create_packet(2, ['ACK','SEC'], 0xabcd,0xfeea, 0xfee0, 3150765550, 286331153, "HELLO", "REQUEST", None, None)
-        
-        
-        self.packetmanager.append_list_to_TLVlist('DATA', ['oneeeeee','twoooooooo','threeeeeeee', 'fourrrrrrr'])
-        
-        self.packetmanager.append_entry_to_TLVlist('DATA', 'data_test')
-        self.packetmanager.append_entry_to_TLVlist('CONTROL', 'control_test')
-        self.packetmanager.append_entry_to_TLVlist('SECURITY', 'security_test')
-        
-        
+        self.packetmanager.create_packet(2, ['SEC'], 0xabcd,0xfeea, 0xfee0, 3150765550, 286331153, "HELLO", "REQUEST", None, None)
+        self.packetmanager.append_entry_to_TLVlist('SECURITY', exp_publicKA+'?'+hash_A)
         packet = self.packetmanager.build_packet()
+        
+        #self.packetmanager.append_list_to_TLVlist('DATA', ['oneeeeee','twoooooooo','threeeeeeee', 'fourrrrrrr'])
+        #self.packetmanager.append_entry_to_TLVlist('DATA', 'data_test')
+        #self.packetmanager.append_entry_to_TLVlist('CONTROL', 'control_test')
+        #self.packetmanager.append_entry_to_TLVlist('SECURITY', 'security_test')
+        #packet = self.packetmanager.build_packet()
         
         print "This is the packet dump"
         self.packetmanager.hex_packet()
         
-        raw_data = '\x29\x02\xAB\xCD\xFE\xEA\xFE\xE0\xBB\xCC\xDD\xEE\x11\x11\x11\x11\x01\x01\x4C\xA9\x02\x30\x30\x30\x38\x6F\x6E\x65\x65\x65\x65\x65\x65\x02\x30\x30\x31\x30\x74\x77\x6F\x6F\x6F\x6F\x6F\x6F\x6F\x6F\xFF\x30\x30\x31\x31\x74\x68\x72\x65\x65\x65\x65\x65\x65\x65\x65'
-        raw_packet = self.packetmanager.create_packet(rawdata = raw_data)
+        #raw_data = '\x29\x02\xAB\xCD\xFE\xEA\xFE\xE0\xBB\xCC\xDD\xEE\x11\x11\x11\x11\x01\x01\x4C\xA9\x02\x30\x30\x30\x38\x6F\x6E\x65\x65\x65\x65\x65\x65\x02\x30\x30\x31\x30\x74\x77\x6F\x6F\x6F\x6F\x6F\x6F\x6F\x6F\xFF\x30\x30\x31\x31\x74\x68\x72\x65\x65\x65\x65\x65\x65\x65\x65'
+        #raw_packet = self.packetmanager.create_packet(rawdata = raw_data)
         
         print "\n\n\n"
         print self.packetmanager.get_version()
@@ -93,7 +101,22 @@ class SyncCFT:
         print self.packetmanager.get_ack()
         print self.packetmanager.get_otype()
         print self.packetmanager.get_ocode()
+        print "This is the TLV_List"
         print self.packetmanager.get_TLVlist()
+        print "This is the get_TLVlist_typevalue"
+        print self.packetmanager.get_TLVlist_typevalue()
+        
+        print "self.packetmanager.get_TLVlist('SECURITY')"
+        print self.packetmanager.get_TLVlist('SECURITY')
+        security_payload = self.packetmanager.get_TLVlist('SECURITY')
+        recovered_plaintextkey = security_payload[0].split('?')[0]
+        recovered_hash = security_payload[0].split('?')[1]
+        
+        recovered_key = self.security.import_key(recovered_plaintextkey)
+        print recovered_key
+        
+        if self.security.calculate_key_hash(recovered_plaintextkey, pwdA) == recovered_hash:
+            print "Access granted!"
         
         '''
         original_packet = packet[:]

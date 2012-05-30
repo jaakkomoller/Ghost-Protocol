@@ -55,7 +55,7 @@ class Security:
         return data[:nbytes] + self.EncodeAES(cipher, data[nbytes:])
     
     def decrypt_AES(self,cipher,data,nbytes):
-        return data[:nbytes] + self.EncodeAES(cipher, data[nbytes:])
+        return data[:nbytes] + self.DecodeAES(cipher, data[nbytes:])
         
     def import_key(self, plaintextkey):
         return RSA.importKey(plaintextkey)

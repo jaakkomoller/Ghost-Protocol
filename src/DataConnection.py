@@ -25,7 +25,7 @@ class DataServer(Thread):
         if not ip: ip = '0.0.0.0'
         if not port: port = random.randint(4500, 4600)
 
-        self.logger = logging.getLogger("Data server started: ip %s, port %s" % (ip,port))
+        self.logger = logging.getLogger("Data server: ip %s, port %s" % (ip,port))
 
         try:
             self.sock = LossySocket(socket.AF_INET, socket.SOCK_DGRAM, 0.0, 0.0)
@@ -61,7 +61,9 @@ class DataServer(Thread):
                                 if self.received_packet.txremoteID == session.local_session_id and self.received_packet.txlocalID == session.remote_session_id:
                                     session.connection.receive_packet_start(self.received_packet)
                                     session.handle(self.received_packet)
+                                    session.connection.sock.setblocking(1)
                                     session.connection.receive_packet_end(self.received_packet,session.sender_id)
+                                    session.connection.sock.setblocking(0)
                         except socket.error:
                                 print("Error when reading a socket")
         return
@@ -70,7 +72,10 @@ class DataServer(Thread):
         self.kill_flag=True
 
     def add_session(self, remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, md5sum, size, is_request):
-        connection = Connection(self.read_list[0], remote_ip, remote_port, local_session_id, remote_session_id,version, 0, 1, logger_str = 'Data connection to ')
+        if is_request:
+            connection = Connection(self.read_list[0], remote_ip, remote_port, local_session_id, remote_session_id,version, 0, 1, logger = self.logger)
+        else:
+            connection = Connection(self.read_list[0], remote_ip, remote_port, local_session_id, remote_session_id,version, 1, 0, logger = self.logger)
         data_session = DataSession(remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, md5sum, size, self.folder, connection, 0)
 
         fail = False
@@ -112,7 +117,7 @@ class DataServer(Thread):
             else:
                 run = False # port was added successfully
 
-        self.logger = logging.getLogger("New port added: port %s" % (new_port))
+        self.logger = logging.getLogger("Data session to: port %s" % (new_port))
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock.bind((self.ip, new_port))
@@ -332,16 +337,18 @@ class DataSession():
 
             while True:
                 status=self.connection.send_packet_reliable(packet_to_send)
-                if status==True:
-                    break
                 try:
-                    buffer, addr = self.connection.sock.recvfrom(2048)
-                    received_packet.packetize_raw(buffer)
-                    # check & confirm that session is valid
-                    if received_packet.txremoteID == self.connection.local_session_id and received_packet.txlocalID == self.connection.remote_session_id:
-                        self.connection.receive_packet_start(received_packet)
+                    while True:
+                        buffer, addr = self.connection.sock.recvfrom(2048)
+                        received_packet.packetize_raw(buffer)
+                        # check & confirm that session is valid
+                        if received_packet.txremoteID == self.connection.local_session_id and received_packet.txlocalID == self.connection.remote_session_id:
+                            self.connection.receive_packet_start(received_packet)
                 except socket.error:
                     pass
+                if status==True:
+                    break
+                time.sleep(0.01)
 
             #self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
             #time.sleep(0.01)

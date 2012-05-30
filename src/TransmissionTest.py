@@ -72,6 +72,18 @@ class ClientSender(Thread):
             else:
                 data = (data + 1) % 100000
                 str_data = "%s%d" % (test_string, data)
+            
+            received_packet = InPacket()
+            self.connection.sock.setblocking(0)
+            while True:
+                try:
+                    d, addr = self.connection.sock.recvfrom(2000)
+                    received_packet.packetize_raw(d)
+                    self.connection.receive_packet_start(received_packet)
+                    #self.connection.receive_packet_end(packet, sender_id)
+                except:
+                    break
+            self.connection.sock.setblocking(1)
         self.connection.stop()
         self.logger.info("sender thread shutting down")
 
@@ -88,10 +100,10 @@ def client(p, q):
     #connection = Connection(sock = sock, remote_ip = "10.0.3.1", remote_port = 6000,
     connection = Connection(sock = sock, remote_ip = "127.0.0.1", remote_port = 6000,
         local_session_id = 2, remote_session_id = 1,
-        version = 1, seq_no = init_seq, send_ack_no = 0, logger_str = "Test Connection to ")
+        version = 1, seq_no = init_seq, send_ack_no = 0, logger = logger)
     
-    receiver = ClientReceiver(connection)
-    receiver.start()
+    #receiver = ClientReceiver(connection)
+    #receiver.start()
     sender = ClientSender(connection, sender_id)
     sender.start()
     
@@ -116,7 +128,7 @@ def server(p, q):
 
     connection = Connection(sock = sock, remote_ip = "127.0.0.1", remote_port = 5000,
         local_session_id = 1, remote_session_id = 2,
-        version = 1, seq_no = 1, send_ack_no = init_seq-1, logger_str = "Test Connection to ")
+        version = 1, seq_no = 1, send_ack_no = init_seq-1, logger = logger)
         
     packet_to_send = OutPacket()
     
@@ -145,11 +157,12 @@ def server(p, q):
                     t = time.time()
                     bits = 0
 
-            packet_to_send.create_packet(version=connection.version, flags=[], senderID=sender_id,
-                txlocalID=connection.local_session_id, txremoteID=connection.remote_session_id,
-                sequence=connection.seq_no, ack=connection.send_ack_no, otype='UPDATE', ocode='REQUEST')
+            #packet_to_send.create_packet(version=connection.version, flags=[], senderID=sender_id,
+            #    txlocalID=connection.local_session_id, txremoteID=connection.remote_session_id,
+            #    sequence=connection.seq_no, ack=connection.send_ack_no, otype='UPDATE', ocode='REQUEST')
+            connection.receive_packet_end(received_packet, sender_id)
 
-            connection.send_packet_unreliable(packet_to_send)
+            #connection.send_packet_unreliable(packet_to_send)
     except KeyboardInterrupt:
         logger.info('CTRL+C received, killing connection...')
         connection.stop()

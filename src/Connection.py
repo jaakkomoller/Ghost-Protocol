@@ -60,7 +60,7 @@ class Connection:
     init_rtt = 1.0 # Initial RTT in secs
     rto_mean_rtts = 5 # RTO is a mean of these * rto_times_rtt
     rto_times_rtt = 3 # RT= is rto_mean_rtts * rto_times_rtt
-    max_local_send_window = 100
+    max_local_send_window = 10
     cong_avoid_drop = 0.8
 
     # TODO check initializations
@@ -68,7 +68,7 @@ class Connection:
     def __init__(self, sock, remote_ip, remote_port, local_session_id, remote_session_id = 0,
             version = 1, send_ack_no = random.randint(0, max_seq-1),
             seq_no = random.randint(0, max_seq-1),
-            rtt = init_rtt, logger_str = "Connection to", local_cong_window = 10, remote_window = 10,
+            rtt = init_rtt, logger = None, local_cong_window = 10, remote_window = 10,
             use_enc = False, peer_key = '', private_key = '', public_key = '', security = None):
         self.sock = sock     # Pointer to server socket
         self.version = version
@@ -87,8 +87,12 @@ class Connection:
         self.sync = thread.allocate_lock()
         self.resends = 0
 
-        logger_str += str(self.remote_ip) + ':' + str(self.remote_port)
-        self.logger = logging.getLogger(logger_str)
+        if logger == None:
+            logger_str = 'Connection to '
+            logger_str += str(self.remote_ip) + ':' + str(self.remote_port)
+            self.logger = logging.getLogger(logger_str)
+        else:
+            self.logger = logger
         self.logger.info("Initializing connection to %s:%i at %s" % (self.remote_ip, self.remote_port, str(time.time())))
 
         self.rtt_buffer = RingBuffer(self.rto_mean_rtts)
@@ -115,10 +119,18 @@ class Connection:
         start = time.time()
         self.sync.acquire()
         self.resends = 0
+       
+        #print '<<receive'
+        #print packet
 
-        if not wrapped_is_greater(packet.sequence, self.send_ack_no, self.max_seq) \
+        if wrapped_is_greater(packet.sequence, self.send_ack_no, self.max_seq) \
                 and packet.sequence != Connection.max_seq:
             self.resend_send_ack = True
+            #self.logger.warning('Setting to true seq: %d, ack: %d' % (packet.sequence, self.send_ack_no))
+        else:
+            self.resend_send_ack = False
+            #self.logger.warning('Setting to false seq: %d, ack: %d' % (packet.sequence, self.send_ack_no))
+
 
         if packet.sequence != Connection.max_seq and \
                 packet.sequence == wrapped_plus(self.send_ack_no, 1, Connection.max_seq):
@@ -127,6 +139,7 @@ class Connection:
             self.logger.debug("Expecting %d, got %d" % (wrapped_plus(self.send_ack_no, 1, Connection.max_seq),
                 packet.sequence))
             self.send_ack_no = packet.sequence
+            self.logger.debug('1: %d, ack: %d' % (packet.sequence, self.send_ack_no))
             ret = True
         else:
             self.logger.debug("Expecting %d, got %d" % (wrapped_plus(self.send_ack_no, 1, Connection.max_seq),
@@ -217,18 +230,21 @@ class Connection:
     def receive_packet_end(self, packet, sender_id):
         if self.resend_send_ack == True:
             # We got new seq but did not ack it
-            self.logger.info('Packet processed. Client waiting for ACK, so acking.')
+            self.logger.debug('Packet processed. Client waiting for ACK, so acking.')
             packet_to_send = OutPacket()
             packet_to_send.create_packet(version=self.version, flags=[], senderID=sender_id,
                 txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
                 sequence=self.seq_no, ack=self.send_ack_no, otype='UPDATE', ocode='RESPONSE')
             self.send_packet_unreliable(packet_to_send)
+        else:
+            self.logger.debug('Packet processed. Client not waiting for ACK, so not acking.')
+            pass
     
     def send_packet_reliable(self, packet, no_enc = False):
         start = time.time()
         self.sync.acquire()
         if self.local_send_window == 0:
-            self.logger.debug('send window full')
+            #self.logger.debug('send window full, seq_no = %d' % self.seq_no)
             self.sync.release()
             return False
         
@@ -305,11 +321,6 @@ class Connection:
         if self.use_enc and not no_enc and not packet.no_enc:
             packet.flag_list.append('CRY')
             bpacket = self.security.encrypt_AES(self.aes_key, packet.build_packet(), 8)
-            #data2 = self.security.decrypt_AES(self.aes_key, bpacket, 8)
-            #packet2 = OutPacket()
-            #packet2.packetize_raw(data2)
-            #if packet.build_packet() != packet2.build_packet():
-            #    exit('Mismatch')
         else:
             bpacket = packet.build_packet()
         self.sock.sendto(bpacket, (self.remote_ip, self.remote_port), resend, packet.sequence)
@@ -345,10 +356,10 @@ class Connection:
         if self.cong_state == Connection.CongState.slow_start:
             self.cong_state = Connection.CongState.cong_avoid
             self.local_cong_window = self.cong_avoid_drop * self.local_cong_window
-            self.logger.warning("Slow start: packet loss. cong window: %d" % self.local_cong_window)
+            self.logger.warning("Slow start: packet loss. cong window: %d, rtt mean: %.2f" % (self.local_cong_window, self.rtt_mean))
         elif self.cong_state == Connection.CongState.cong_avoid:
             self.local_cong_window = self.cong_avoid_drop * self.local_cong_window
-            self.logger.warning("Cong avoid: packet loss. cong window: %d" % self.local_cong_window)
+            self.logger.warning("Cong avoid: packet loss. cong window: %d, rtt mean: %.2f" % (self.local_cong_window, self.rtt_mean))
 
     def stop(self):
         self.resend_timer_lock.acquire()

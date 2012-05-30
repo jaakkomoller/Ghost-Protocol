@@ -36,6 +36,7 @@ class SignalServer(Thread):
 
         self.logger = logging.getLogger("Signal server")
         self.logger.info("Initializing signal server id: %d at %s" % (self.sender_id, str(time.time())))
+        self.logger.setLevel(logging.WARNING)
 
         self.sock = LossySocket(socket.AF_INET, socket.SOCK_DGRAM, q = q, p = p)
         self.sock.bind((ip, port))
@@ -174,13 +175,15 @@ class SignalConnection(Connection):
     def __init__(self, server, remote_ip, remote_port, local_session_id, remote_session_id = 0,
             version = 1, send_ack_no = random.randint(0, 65534), seq_no = random.randint(0, 65535),
             updatetime = 5):
+        self.logger = logging.getLogger('Signal connection')
+        self.logger.info("Initializing signal connection to %s:%i at %s" % (remote_ip, remote_port, str(time.time())))
+        self.logger.setLevel(logging.WARNING)
         Connection.__init__(self, sock = server.sock, remote_ip = remote_ip, remote_port = remote_port,
             local_session_id = local_session_id, remote_session_id = remote_session_id,
-            version = version, send_ack_no = send_ack_no, seq_no = seq_no, logger_str = "Signal Connection to ",
+            version = version, send_ack_no = send_ack_no, seq_no = seq_no, logger = self.logger,
             use_enc = server.use_enc, private_key = server.privateKey, public_key = server.publicKey,
             security = server.security)
         self.server = server
-        self.logger.info("Initializing signal connection to %s:%i at %s" % (self.remote_ip, self.remote_port, str(time.time())))
         self.state = SignalConnection.State.UNCONNECTED
 
         self.last_update = time.time() # Marks the time of last sent update request
@@ -391,14 +394,15 @@ class SignalConnection(Connection):
                 elif tlv.split('?')[0] == 'md5sum':
                     md5sum = tlv.split('?')[1]
             # TODO Launch Tomi's code here
-            print '* Creating data connection: *'
-            print (self.remote_ip, remote_port,
-                local_tx_id, remote_tx_id, self.version, self.server.sender_id,
-                fname, md5sum, fsize)
-            print '**'
-            self.server.dataserver.add_session(self.remote_ip, remote_port,
-                local_tx_id, remote_tx_id, self.version, self.server.sender_id,
-                fname, md5sum, fsize, True)
+            if fname not in [ses.file_path for ses in self.server.dataserver.session_list]:
+                print '* Creating data connection: *'
+                print (self.remote_ip, remote_port,
+                    local_tx_id, remote_tx_id, self.version, self.server.sender_id,
+                    fname, md5sum, fsize)
+                print '**'
+                self.server.dataserver.add_session(self.remote_ip, remote_port,
+                    local_tx_id, remote_tx_id, self.version, self.server.sender_id,
+                    fname, md5sum, fsize, True)
         else:
             self.logger.error('invalid packet or state')
     
@@ -481,14 +485,17 @@ class SignalConnection(Connection):
         local_tx_id = self.server.get_new_session_id(random.randint(0, 65535))
         local_data_port = self.server.dataserver.get_port()
         packet_to_send = OutPacket()
-        self.server.dataserver.add_session(self.remote_ip, remote_data_port,
-            local_tx_id, remote_tx_id, self.version, self.server.sender_id,
-            fname, '', 0, False)
-        print '* Creating data connection: *'
-        print (self.remote_ip, remote_data_port,
-            local_tx_id, remote_tx_id, self.version, self.server.sender_id,
-            fname)
-        print '**'
+        if fname not in [ses.file_path for ses in self.server.dataserver.session_list]:
+            self.server.dataserver.add_session(self.remote_ip, remote_data_port,
+                local_tx_id, remote_tx_id, self.version, self.server.sender_id,
+                fname, '', 0, False)
+            print '* Creating data connection: *'
+            print (self.remote_ip, remote_data_port,
+                local_tx_id, remote_tx_id, self.version, self.server.sender_id,
+                fname)
+            print '**'
+        else:
+            return
         packet_to_send.create_packet(version=self.version, flags=[], senderID=self.server.sender_id,
             txlocalID=self.local_session_id, txremoteID=self.remote_session_id,
             sequence=self.seq_no, ack=self.send_ack_no, otype='PULL', ocode='RESPONSE')
@@ -512,7 +519,8 @@ def main():
 
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s', datefmt='%d.%m.%y %H:%M:%S', filename='SyncCFT.log', filemode='w')
     console = logging.StreamHandler()
-    console.setLevel(logging.DEBUG) 
+    #console.setLevel(logging.DEBUG) 
+    console.setLevel(logging.WARNING) 
     formatter = logging.Formatter('%(levelname)s: %(name)s: %(message)s')
     console.setFormatter(formatter)
     logging.getLogger('').addHandler(console)
@@ -525,7 +533,7 @@ def main():
         logger.error("An error occurred while loading the configuration!")
         return
 
-    (port, folder, p_prob, q_prob, peers) = conf_values
+    (port, folder, p_prob, q_prob, peers, passwd) = conf_values
     #Logging of configuration 
     logger.info("Listening on UDP port %s" % (str(port)))
     logger.info("'p' parameter: %s" % (str(p_prob)))
@@ -545,7 +553,7 @@ def main():
     dataserver.add_port()
     server = SignalServer(fsystem = fsystem, dataserver = dataserver, port = int(port),
         sender_id = random.randint(0, 65535),
-        q = q_prob, p = p_prob, passwd = config.load_password())
+        q = q_prob, p = p_prob, passwd = passwd)
 
     server.init_connections(peers)
     server.start()
@@ -555,6 +563,7 @@ def main():
         except KeyboardInterrupt:
             logger.info('CTRL+C received, killing server...')
             server.stop()
+            dataserver.kill_server()
         
     fsystem.terminate_thread()
     logger.info('Stopping...')

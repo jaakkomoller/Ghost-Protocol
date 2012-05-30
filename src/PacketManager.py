@@ -27,20 +27,6 @@ class PacketManager():
         self.logger = logging.getLogger("PacketManager")
         self.logger.debug("PacketManager created")
         
-        self.version=1
-        self.flags=0
-        self.senderID=0
-        self.txlocalID=0
-        self.txremoteID=0
-        self.sequence=0
-        self.ack=0
-        self.otype=0
-        self.ocode=0
-        self.TLVlist=[]
-        self.rawdata=None
-        self.bytearrayTLV = ' '
-        self.flag_list = []
-        
     def create_packet(self, version=1, flags=0, senderID=0, txlocalID=0, txremoteID=0,
                       sequence=0, ack=0, otype=0, ocode=0, TLVlist=None, rawdata=None):
         
@@ -164,8 +150,9 @@ class PacketManager():
                 self.TLVs.append(tlventry)
             else:
                 remaining_items.append(item)
-                
-        print "The following TLV(s) could not be added:", remaining_items
+        
+        if len(remaining_items) != 0:
+            print "The following TLV(s) could not be added:", remaining_items
         return remaining_items
 
     def purge_tlvs(self, ttype = ""):
@@ -181,7 +168,7 @@ class PacketManager():
         if self.flags & 4 == 4:
             flaglist.append('ECN')
         if self.flags & 2 == 2:
-            flaglist.append('CRY')
+            flaglist.append('URG')
         if self.flags & 1 == 1:
             flaglist.append('ACK')
         return flaglist
@@ -287,12 +274,12 @@ class PacketManager():
             self.logger.debug("There are no FLAGs to build")
             del self.flag_list[:]
             return
-        #FLAG = {'ACK':1, 'CRY':2, 'ECN':4, 'SEC':8}
+        #FLAG = {'ACK':1, 'URG':2, 'ECN':4, 'SEC':8}
         else:
             for item in self.flag_list:
                 if item == 'ACK':
                     flagvalue += 1
-                elif item == 'CRY':
+                elif item == 'URG':
                     flagvalue += 2
                 elif item == 'ECN':
                     flagvalue += 4
@@ -393,6 +380,7 @@ class PacketManager():
                     r=r+i2
             print r
             i += 16
+
 
 class OutPacket(PacketManager):
     send_time = 0.0

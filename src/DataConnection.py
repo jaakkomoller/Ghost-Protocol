@@ -39,16 +39,22 @@ class DataServer(Thread):
         self.received_packet = InPacket()
 
     def run(self):
-        timeout = 5
+        timeout = 1
         while not self.kill_flag:
             input = select.select(self.read_list,[],[],timeout)
             # Data handling or timeout
 
-            if input == ([], [], []):
-                pass
-                #print "timeout"
-                #TODO: remove old sessions
-                #TODO: check if we need to resend something
+	    if input == ([], [], []):
+                # print timeout
+
+                # remove old sessions
+                for session in self.session_list:
+
+                    if session.status==1 or session.status==2:
+                        self.session_list.remove(session)
+                    # check if we need to resend something
+                    else:
+                        session.check_timeout()
 
             for s in input:
                 for r in self.read_list:
@@ -63,7 +69,11 @@ class DataServer(Thread):
                                     session.handle(self.received_packet)
                                     session.connection.sock.setblocking(1)
                                     session.connection.receive_packet_end(self.received_packet,session.sender_id)
+
                                     session.connection.sock.setblocking(0)
+
+                                if session.status==1 or session.status==2:
+                                    self.session_list.remove(session)
                         except socket.error:
                                 print("Error when reading a socket")
         return
@@ -80,10 +90,7 @@ class DataServer(Thread):
 
         fail = False
         for session in self.session_list:
-            #TODO: move this
-            if session.status==1 or session.status==2:
-                self.session_list.remove(session)
-
+            
             if session.local_session_id==data_session.local_session_id and session.remote_session_id==data_session.remote_session_id:
                 #print("ignore session, it's already there")
                 fail=True
@@ -151,6 +158,7 @@ class DataSession():
     allocated = False
     chunks_to_receive = []
     failed_chunks = {}
+    timeout = 0
     #status: 0 = processing, 1 = ready, 2 = failed
 
     def __init__(self, remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, md5sum, size, folder, connection, status=0):
@@ -195,10 +203,14 @@ class DataSession():
         self.bye_req()
 
     def check_timeout(self):
-        #TODO: check if too much time is passed and remove session if necessary
-        #if timeout occured -> self.status=2
-
-        if len(self.failed_chunks)==0:
+        # check if too much time is passed and remove session if necessary
+        self.timeout=self.timeout+1        
+       
+        if self.timeout>1000:
+            self.status=2
+            self.bye_req()
+            return
+        elif len(self.failed_chunks)==0:
             return
         elif max(self.failed_chunks, key=self.failed_chunks.get)>5:
             self.status=2
@@ -222,6 +234,7 @@ class DataSession():
         to_chunk = None
         from_ok = 0
         to_ok = 0
+        self.timeout = 0
 
         if packet.otype == OPERATION['BYE'] and packet.ocode == CODE['REQUEST']:
             self.status=1

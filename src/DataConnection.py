@@ -39,14 +39,14 @@ class DataServer(Thread):
         self.received_packet = InPacket()
 
     def run(self):
-        timeout = 1
+        timeout = 5
         while not self.kill_flag:
             input = select.select(self.read_list,[],[],timeout)
             # Data handling or timeout
 
 	    if input == ([], [], []):
                 # print timeout
-
+ 
                 # remove old sessions
                 for session in self.session_list:
 
@@ -72,9 +72,7 @@ class DataServer(Thread):
 
                                     session.connection.sock.setblocking(0)
 
-                                if session.status==1 or session.status==2:
-                                    self.session_list.remove(session)
-                        except socket.error:
+                         except socket.error:
                                 print("Error when reading a socket")
         return
 

@@ -43,18 +43,18 @@ class DataServer(Thread):
             # Data handling or timeout
 
             #if input == ([], [], []):
-            if len(buffer) == 0:
+            #if len(buffer) == 0:
                 # print timeout
  
                 # remove old sessions
-                for session in self.session_list:
+            for session in self.session_list:
 
-                    if session.status==1 or session.status==2:
-                        self.session_list.remove(session)
+                if session.status==1 or session.status==2:
+                    self.session_list.remove(session)
                     # check if we need to resend something
-                    else:
+                else:
                        # session.check_timeout()
-                       pass
+                   pass
 
 
             #for s in input:
@@ -323,6 +323,7 @@ class DataSession():
             status=self.connection.send_packet_reliable(packet_to_send)
             if status==True:
                 break
+            print '1'
 
     def bye_response(self):
         packet_to_send = OutPacket()
@@ -332,6 +333,7 @@ class DataSession():
             status=self.connection.send_packet_reliable(packet_to_send)
             if status==True:
                 break
+            print '2'
 
     def data_req(self,from_chunk,to_chunk):
 
@@ -344,6 +346,7 @@ class DataSession():
             status=self.connection.send_packet_reliable(packet_to_send)
             if status==True:
                 break
+            print '3'
 
     def data_response(self,from_chunk, to_chunk):
 
@@ -359,6 +362,7 @@ class DataSession():
 
             while True:
                 status=self.connection.send_packet_reliable(packet_to_send)
+                self.connection.sock.setblocking(0)
                 try:
                     while True:
                         buffer, addr = self.connection.sock.recvfrom(2048)
@@ -381,11 +385,14 @@ class DataSession():
                                     self.logger.warning('Invalid data in encrypted data packet!')
                                     break
                             self.connection.receive_packet_start(received_packet)
+                    print '4'
                 except socket.error:
                     pass
+                self.connection.sock.setblocking(1)
                 if status==True:
                     break
                 time.sleep(0.01)
+                print '*4'
 
 
             #self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))

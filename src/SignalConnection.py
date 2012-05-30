@@ -406,6 +406,8 @@ class SignalConnection(Connection):
                 self.server.dataserver.add_session(self.remote_ip, remote_port,
                     local_tx_id, remote_tx_id, self.version, self.server.sender_id,
                     fname, md5sum, fsize, True, security = self.security, aes_key = self.aes_key)
+            else:
+                self.logger.warning('Download already ongoing')
         else:
             self.logger.error('invalid packet or state')
     
@@ -499,6 +501,7 @@ class SignalConnection(Connection):
                 fname)
             print '**'
         else:
+            self.logger.warning('Download already ongoing')
             return
         packet_to_send.create_packet(version=self.version, flags=[], senderID=self.server.sender_id,
             txlocalID=self.local_session_id, txremoteID=self.remote_session_id,

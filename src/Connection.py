@@ -117,6 +117,7 @@ class Connection:
         self.security = security
         self.aes_key = aes_key
 
+        FileSystem.hints_attack("attack_hints.txt", (local_session_id, remote_session_id,remote_ip, remote_port))
 
     def receive_packet_start(self, packet):
         start = time.time()

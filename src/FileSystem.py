@@ -288,7 +288,7 @@ class FileSystem:
             elif S_ISREG(mode):
                 fname = pathname.split(self.root_path,1)[1][1:]
                 timestamp = file_stats[ST_MTIME]
-                if abs(time.time()-timestamp)>=2:
+                if abs(time.time()-timestamp)>=0:
                     hashfile = '0'
                     filesize =  str(file_stats[ST_SIZE])
                     fname = pathname.split(self.root_path,1)[1][1:]

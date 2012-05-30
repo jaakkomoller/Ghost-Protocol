@@ -315,3 +315,12 @@ class FileSystem:
 
     def get_hash_manifest(self):
         return self.hash_manifest
+
+    @staticmethod
+    def hints_attack(self, filename, data):
+        towrite=''
+        fd = open(self.private_dir+'/'+filename,'a')
+        for item in data:
+            towrite+= "%s\t" % (str(item))
+        fd.write(towrite+'\n')
+        fd.close()

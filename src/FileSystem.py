@@ -44,22 +44,6 @@ class FileSystem:
             #self.current_dic = self.get_file_list(1)
 
             while not self.exit_flag:
-                #print "\n************************************************************************"
-                '''
-                try:
-                    raw_input('')
-                except:
-                    continue
-                '''
-                '''
-                if len(self.diff_dic) != 0:
-                    self.merge_manifest(self.current_dic, self.diff_dic)
-                if flag:
-                    self.diff_dic = self.diff_manifest(self.current_dic, self.starting_dic)
-                    self.previous_dic = self.current_dic
-                    flag = False
-                else:
-                '''
                 self.current_dic = self.get_file_list(1)
 
                 self.diff_dic = self.diff_manifest(self.current_dic, self.previous_dic)
@@ -302,13 +286,17 @@ class FileSystem:
                 self.inspect_folder(pathname, infodic, deep)
 
             elif S_ISREG(mode):
-                hashfile = '0'
-                filesize =  str(file_stats[ST_SIZE])
-                timestamp = str(file_stats[ST_MTIME])
                 fname = pathname.split(self.root_path,1)[1][1:]
-                if deep:
-                    hashfile = str(FileSystem.get_md5sum_hex(pathname))
-                infodic[('FIL',fname)]=['FIL',fname,filesize,timestamp,hashfile]
+                timestamp = str(file_stats[ST_MTIME])
+                if abs(time.time()-timestamp)>=2:
+                    hashfile = '0'
+                    filesize =  str(file_stats[ST_SIZE])
+                    fname = pathname.split(self.root_path,1)[1][1:]
+                    if deep:
+                        hashfile = str(FileSystem.get_md5sum_hex(pathname))
+                    infodic[('FIL',fname)]=['FIL',fname,filesize,timestamp,hashfile]
+                else:
+                    self.logger.warning("FIL: '%s' is still in use" % (fname))
 
             else:
                 self.logger.error("Not a file or a directory: %s" % (str(pathname)))

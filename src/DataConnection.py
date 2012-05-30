@@ -152,9 +152,10 @@ class DataServer(Thread):
             pass
 
     def get_port(self):
-        from random import choice
-        retval=choice(self.port_list)
-        return retval[0]
+        return self.port
+        #from random import choice
+        #retval=choice(self.port_list)
+        #return retval[0]
 
 
 class DataSession():

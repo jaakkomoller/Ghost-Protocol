@@ -28,7 +28,7 @@ class FileSystem:
         self.thread_id = thread.start_new_thread(self.loop,(timeout,))
 
     def loop(self,timeout):
-        try:
+#        try:
             flag = True
             if self.exists_manifest():
                 self.logger.info("Found manifest file!")
@@ -68,9 +68,9 @@ class FileSystem:
                 #Sleep for 1 second and detect changes
                 time.sleep(timeout)
 
-        except Exception as e:
-            print "Something nasty happened!"
-            print e.args
+        #except Exception as e:
+        #    print "Something nasty happened!"
+        #    print e.args
 
     def terminate_thread(self):
         self.exit_flag = True
@@ -287,14 +287,14 @@ class FileSystem:
 
             elif S_ISREG(mode):
                 fname = pathname.split(self.root_path,1)[1][1:]
-                timestamp = str(file_stats[ST_MTIME])
+                timestamp = file_stats[ST_MTIME]
                 if abs(time.time()-timestamp)>=2:
                     hashfile = '0'
                     filesize =  str(file_stats[ST_SIZE])
                     fname = pathname.split(self.root_path,1)[1][1:]
                     if deep:
                         hashfile = str(FileSystem.get_md5sum_hex(pathname))
-                    infodic[('FIL',fname)]=['FIL',fname,filesize,timestamp,hashfile]
+                    infodic[('FIL',fname)]=['FIL',fname,filesize,str(timestamp),hashfile]
                 else:
                     self.logger.warning("FIL: '%s' is still in use" % (fname))
 

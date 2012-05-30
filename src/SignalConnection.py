@@ -558,7 +558,7 @@ def main():
 
     dataserver = DataServer(fsystem.root_path,'0.0.0.0',int(port)+1, use_enc = use_enc, p = p_prob, q = q_prob)
     dataserver.start()
-    dataserver.add_port()
+    #dataserver.add_port()
     server = SignalServer(fsystem = fsystem, dataserver = dataserver, port = int(port),
         sender_id = random.randint(0, 65535),
         q = q_prob, p = p_prob, passwd = passwd)

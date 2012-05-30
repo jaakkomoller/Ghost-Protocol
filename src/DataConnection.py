@@ -46,7 +46,7 @@ class DataServer(Thread):
 
 	    if input == ([], [], []):
                 # print timeout
-
+ 
                 # remove old sessions
                 for session in self.session_list:
 
@@ -54,7 +54,9 @@ class DataServer(Thread):
                         self.session_list.remove(session)
                     # check if we need to resend something
                     else:
-                        session.check_timeout()
+                       # session.check_timeout()
+                       pass
+
 
             for s in input:
                 for r in self.read_list:
@@ -72,10 +74,8 @@ class DataServer(Thread):
 
                                     session.connection.sock.setblocking(0)
 
-                                if session.status==1 or session.status==2:
-                                    self.session_list.remove(session)
                         except socket.error:
-                                print("Error when reading a socket")
+                            print("Error when reading a socket")
         return
 
     def kill_server(self):

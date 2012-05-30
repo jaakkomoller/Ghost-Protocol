@@ -39,7 +39,7 @@ class DataServer(Thread):
         self.received_packet = InPacket()
 
     def run(self):
-        timeout = 5
+        timeout = 1
         while not self.kill_flag:
             input = select.select(self.read_list,[],[],timeout)
             # Data handling or timeout
@@ -54,7 +54,9 @@ class DataServer(Thread):
                         self.session_list.remove(session)
                     # check if we need to resend something
                     else:
-                        session.check_timeout()
+                       # session.check_timeout()
+                       pass
+
 
             for s in input:
                 for r in self.read_list:
@@ -72,8 +74,8 @@ class DataServer(Thread):
 
                                     session.connection.sock.setblocking(0)
 
-                         except socket.error:
-                                print("Error when reading a socket")
+                        except socket.error:
+                            print("Error when reading a socket")
         return
 
     def kill_server(self):

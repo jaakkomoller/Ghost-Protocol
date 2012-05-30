@@ -319,6 +319,8 @@ class DataSession():
         packet_to_send = OutPacket()
         packet_to_send.create_packet(version=self.version, flags=[0],senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id, otype='BYE', ocode='REQUEST')
 
+        self.logger.info('BYE request, stopping')
+
         while True:
             status=self.connection.send_packet_reliable(packet_to_send)
             if status==True:
@@ -328,6 +330,8 @@ class DataSession():
     def bye_response(self):
         packet_to_send = OutPacket()
         packet_to_send.create_packet(version=self.version, flags=[0],senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id, otype='BYE', ocode='RESPONSE')
+
+        self.logger.info('BYE response, stopping')
 
         while True:
             status=self.connection.send_packet_reliable(packet_to_send)
@@ -341,6 +345,7 @@ class DataSession():
         packet_to_send.create_packet(version=self.version, flags=[0],senderID=self.sender_id, txlocalID=self.local_session_id, txremoteID=self.remote_session_id, otype='DATA', ocode='REQUEST')
         packet_to_send.append_entry_to_TLVlist('DATA', self.file_path)
         packet_to_send.append_entry_to_TLVlist('DATACONTROL', 'from?%d' % from_chunk +'?to?%d' %to_chunk)
+
 
         while True:
             status=self.connection.send_packet_reliable(packet_to_send)
@@ -392,7 +397,6 @@ class DataSession():
                 if status==True:
                     break
                 time.sleep(0.01)
-                print '*4'
 
 
             #self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))

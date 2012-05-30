@@ -364,10 +364,10 @@ class Connection:
         if self.cong_state == Connection.CongState.slow_start:
             self.cong_state = Connection.CongState.cong_avoid
             self.local_cong_window = self.cong_avoid_drop * self.local_cong_window
-            self.logger.warning("Slow start: packet loss. cong window: %d, rtt mean: %.2f" % (self.local_cong_window, self.rtt_mean))
+            self.logger.debug("Slow start: packet loss. cong window: %d, rtt mean: %.2f" % (self.local_cong_window, self.rtt_mean))
         elif self.cong_state == Connection.CongState.cong_avoid:
             self.local_cong_window = self.cong_avoid_drop * self.local_cong_window
-            self.logger.warning("Cong avoid: packet loss. cong window: %d, rtt mean: %.2f" % (self.local_cong_window, self.rtt_mean))
+            self.logger.debug("Cong avoid: packet loss. cong window: %d, rtt mean: %.2f" % (self.local_cong_window, self.rtt_mean))
 
     def stop(self):
         self.resend_timer_lock.acquire()

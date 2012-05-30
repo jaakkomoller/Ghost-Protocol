@@ -58,9 +58,9 @@ class Connection:
     max_user_id = int("FF", 16)
     max_resend_time = 10.0    # Max resend time in secs
     init_rtt = 1.0 # Initial RTT in secs
-    rto_mean_rtts = 5 # RTO is a mean of these * rto_times_rtt
-    rto_times_rtt = 3 # RT= is rto_mean_rtts * rto_times_rtt
-    max_local_send_window = 10
+    rto_mean_rtts = 10 # RTO is a mean of these * rto_times_rtt
+    rto_times_rtt = 5 # RT= is rto_mean_rtts * rto_times_rtt
+    max_local_send_window = 50
     cong_avoid_drop = 0.8
 
     # TODO check initializations
@@ -69,7 +69,8 @@ class Connection:
             version = 1, send_ack_no = random.randint(0, max_seq-1),
             seq_no = random.randint(0, max_seq-1),
             rtt = init_rtt, logger = None, local_cong_window = 10, remote_window = 10,
-            use_enc = False, peer_key = '', private_key = '', public_key = '', security = None):
+            use_enc = False, peer_key = '', private_key = '', public_key = '', security = None,
+            aes_key = None):
         self.sock = sock     # Pointer to server socket
         self.version = version
         self.remote_ip = remote_ip
@@ -107,12 +108,14 @@ class Connection:
         self.cong_state = Connection.CongState.slow_start
         self.local_cong_window = local_cong_window
         self.last_packet_recv_time = -1 # Last time a packet was received
+        self.last_resend = 0.0
 
         self.use_enc = use_enc
         self.peer_key = peer_key
         self.private_key = private_key
         self.public_key = public_key
         self.security = security
+        self.aes_key = aes_key
 
 
     def receive_packet_start(self, packet):
@@ -123,7 +126,10 @@ class Connection:
         #print '<<receive'
         #print packet
 
-        if wrapped_is_greater(packet.sequence, self.send_ack_no, self.max_seq) \
+        self.logger.debug('p seq: %d p ack %d s ack: %d s seq %d unack %d lst rsnd %.2f rtt %.2f' % (packet.sequence, packet.ack, self.send_ack_no, self.seq_no, self.unack_queue.getSize(), \
+            (time.time()-self.last_resend), self.rtt_mean))
+        #if wrapped_is_greater(packet.sequence, self.send_ack_no, self.max_seq) \
+        if packet.sequence != self.send_ack_no \
                 and packet.sequence != Connection.max_seq:
             self.resend_send_ack = True
             #self.logger.warning('Setting to true seq: %d, ack: %d' % (packet.sequence, self.send_ack_no))
@@ -320,7 +326,7 @@ class Connection:
 #       print packet.build_packet()
         if self.use_enc and not no_enc and not packet.no_enc:
             packet.flag_list.append('CRY')
-            bpacket = self.security.encrypt_AES(self.aes_key, packet.build_packet(), 8)
+            bpacket = self.security.encrypt_AES_bin(self.aes_key, packet.build_packet(), 8)
         else:
             bpacket = packet.build_packet()
         self.sock.sendto(bpacket, (self.remote_ip, self.remote_port), resend, packet.sequence)
@@ -332,6 +338,7 @@ class Connection:
         
         for packet in self.unack_queue.get():
             if packet != None:
+                self.last_resend = time.time()
                 self.logger.debug('Resending %d' % packet.sequence)
                 self.__send_out(packet, resend = True)
                 packet.resends += 1
@@ -479,7 +486,7 @@ class Connection:
                     self.__connection.no_ack_timeout()
 
                     # Resend again with doubled timeout
-                    if self.__connection.resends > 5:
+                    if self.__connection.resends > 1:
                         self.setZzz(self.__zzz * 2)
                     self.__when_to_wake = time.time() + self.__zzz
 
@@ -526,6 +533,8 @@ class Connection:
                 else:
                     self.logger.debug("Negative resend time provided. Setting to max resend time.")
                 self.__zzz = Connection.max_resend_time
+            elif zzz < 0.1:
+                self.__zzz = 0.1
             else:
                 self.__zzz = zzz
 
@@ -667,16 +676,16 @@ def wrapped_minus(num1, num2, modulo):
     return (modulo + num1 - num2) % modulo
 
 def wrapped_is_greater(num1, num2, modulo):
-    if num1 < 100:
-        num1 += modulo
-    if num2 < 100:
-        num2 += modulo
+    if num1 < 100 and num2 > (modulo -100):
+        return True
+    elif num2 < 100 and num1 > (modulo -100):
+        return False
     return num1 > num2
     
 def wrapped_is_smaller(num1, num2, modulo):
-    if num1 < 100:
-        num1 += modulo
-    if num2 < 100:
-        num2 += modulo
+    if num1 < 100 and num2 > (modulo -100):
+        return False
+    elif num2 < 100 and num1 > (modulo -100):
+        return True
     return num1 < num2
 

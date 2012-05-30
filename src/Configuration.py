@@ -5,7 +5,7 @@ class Configuration():
     default_port = 4321
     port = 0
     p_prob = 0.0
-    q_prob = 1.0
+    q_prob = 0.0
     folder = ''
     peers = []
 
@@ -50,32 +50,6 @@ class Configuration():
             self.folder = os.path.join(os.getcwd(),self.folder)
         else:
             self.folder = os.getcwd()
-
-        if self.p_prob and self.q_prob:
-            if self.p_prob+self.q_prob != 1.0:
-                self.logger.error("Q and P probabilities are incorrect")
-                return
-
-        elif self.p_prob and not self.q_prob:
-            if self.p_prob>1.0:
-                self.logger.error("Q and P probabilities are incorrect")
-                return
-            else:
-                #self.q_prob = self.p_prob
-                self.q_prob = 1.0 - self.p_prob
-
-        elif self.q_prob and not self.p_prob:
-            if self.q_prob>1.0:
-                self.logger.error("Q and P probabilities are incorrect")
-                return
-            else:
-                #self.q_prob = self.p_prob
-                self.p_prob = 1.0 - self.q_prob
-
-        elif not self.p_prob and not self.q_prob:
-            self.p_prob=0.0
-            self.q_prob=1.0
-            self.logger.warning("Q and P probabilities are not set")
 
         for peer in temp_list:
             #Process peer list and extract IP:port per peer.

@@ -11,16 +11,15 @@ class DataServer(Thread):
     logger = None
     received_packet = None
     buffer_size = 2048
-    port_list = [] # port, socket
-    read_list = [] # contains all the sockets for select
     session_list = []
     kill_flag = False
 
-    def __init__(self, folder, ip = "", port = ""):
+    def __init__(self, folder, ip = "", port = "", use_enc = False, p = 0.0, q = 0.0):
         Thread.__init__(self)
         self.ip=ip
         self.port=port
         self.folder = folder
+        self.use_enc = use_enc
 
         if not ip: ip = '0.0.0.0'
         if not port: port = random.randint(4500, 4600)
@@ -28,11 +27,9 @@ class DataServer(Thread):
         self.logger = logging.getLogger("Data server: ip %s, port %s" % (ip,port))
 
         try:
-            self.sock = LossySocket(socket.AF_INET, socket.SOCK_DGRAM, 0.0, 0.0)
+            self.sock = LossySocket(socket.AF_INET, socket.SOCK_DGRAM, p, q)
             self.sock.bind((ip, port))
-            self.sock.setblocking(0) # non-blocking
-            self.port_list.append([port,self.sock])
-            self.read_list.append(self.sock)
+            #self.sock.setblocking(0) # non-blocking
         except socket.error:
                 print("Error with socket")
 
@@ -41,10 +38,12 @@ class DataServer(Thread):
     def run(self):
         timeout = 1
         while not self.kill_flag:
-            input = select.select(self.read_list,[],[],timeout)
+            #input = select.select(self.read_list,[],[],timeout)
+            buffer, addr = self.sock.recvfrom(2000)
             # Data handling or timeout
 
-	    if input == ([], [], []):
+            #if input == ([], [], []):
+            if len(buffer) == 0:
                 # print timeout
  
                 # remove old sessions
@@ -58,35 +57,43 @@ class DataServer(Thread):
                        pass
 
 
-            for s in input:
-                for r in self.read_list:
-                    if s == [r]:
+            #for s in input:
+            #for r in self.read_list:
+            #if s == [r]:
+            #try:
+            #    buffer, addr = r.recvfrom(self.buffer_size)
+            
+            if self.use_enc:
+                self.received_packet.packetize_header(buffer)
+            else:
+                self.received_packet.packetize_raw(buffer)
+
+            for session in self.session_list:
+                if self.received_packet.txremoteID == session.local_session_id and self.received_packet.txlocalID == session.remote_session_id:
+                    if self.use_enc:
                         try:
-                            buffer, addr = r.recvfrom(self.buffer_size)
-                            self.received_packet.packetize_raw(buffer)
+                            buffer = session.connection.security.decrypt_AES_bin(session.connection.aes_key, buffer, 8)
+                            if not self.received_packet.packetize_raw(buffer):
+                                self.logger.warning('Invalid data in encrypted data packet!')
+                                break
+                        except:
+                            self.logger.warning('Invalid data in encrypted data packet!')
+                            break
 
-                            for session in self.session_list:
-                                if self.received_packet.txremoteID == session.local_session_id and self.received_packet.txlocalID == session.remote_session_id:
-                                    session.connection.receive_packet_start(self.received_packet)
-                                    session.handle(self.received_packet)
-                                    session.connection.sock.setblocking(1)
-                                    session.connection.receive_packet_end(self.received_packet,session.sender_id)
+                    session.connection.receive_packet_start(self.received_packet)
+                    session.handle(self.received_packet)
+                    session.connection.receive_packet_end(self.received_packet,session.sender_id)
 
-                                    session.connection.sock.setblocking(0)
-
-                        except socket.error:
-                            print("Error when reading a socket")
-        return
 
     def kill_server(self):
         self.kill_flag=True
 
-    def add_session(self, remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, md5sum, size, is_request):
+    def add_session(self, remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, md5sum, size, is_request, security = None, aes_key = None):
         if is_request:
-            connection = Connection(self.read_list[0], remote_ip, remote_port, local_session_id, remote_session_id,version, 0, 1, logger = self.logger)
+            connection = Connection(self.sock, remote_ip, remote_port, local_session_id, remote_session_id,version, 0, 1, logger = self.logger, security = security, aes_key = aes_key, use_enc = self.use_enc)
         else:
-            connection = Connection(self.read_list[0], remote_ip, remote_port, local_session_id, remote_session_id,version, 1, 0, logger = self.logger)
-        data_session = DataSession(remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, md5sum, size, self.folder, connection, 0)
+            connection = Connection(self.sock, remote_ip, remote_port, local_session_id, remote_session_id,version, 1, 0, logger = self.logger, security = security, aes_key = aes_key, use_enc = self.use_enc)
+        data_session = DataSession(remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, md5sum, size, self.folder, connection, 0, logger = self.logger)
 
         fail = False
         for session in self.session_list:
@@ -128,7 +135,7 @@ class DataServer(Thread):
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock.bind((self.ip, new_port))
-            self.sock.setblocking(0) # non-blocking
+            #self.sock.setblocking(0) # non-blocking
             self.port_list.append([new_port,self.sock])
             self.read_list.append(self.sock)
         except socket.error:
@@ -161,7 +168,7 @@ class DataSession():
     timeout = 0
     #status: 0 = processing, 1 = ready, 2 = failed
 
-    def __init__(self, remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, md5sum, size, folder, connection, status=0):
+    def __init__(self, remote_ip, remote_port, local_session_id, remote_session_id, version, sender_id, file_path, md5sum, size, folder, connection, status=0, logger = None):
 
         self.remote_ip = remote_ip
         self.remote_port = remote_port
@@ -178,6 +185,7 @@ class DataSession():
         self.temp_file_path = self.folder+"/.private/file_"+str(self.local_session_id)+str(self.remote_session_id)+str(self.sender_id)+".temp"
         self.initialize_transfer()
         self.connection=connection
+        self.logger = logger
 
     def initialize_transfer(self):
         max = self.get_chunk_count()
@@ -353,15 +361,31 @@ class DataSession():
                 try:
                     while True:
                         buffer, addr = self.connection.sock.recvfrom(2048)
-                        received_packet.packetize_raw(buffer)
+                        #print 'data received:'
+                        #print PacketManager.hex_data(buffer)
+                        
+                        if self.connection.use_enc:
+                            received_packet.packetize_header(buffer)
+                        else:
+                            received_packet.packetize_raw(buffer)
                         # check & confirm that session is valid
                         if received_packet.txremoteID == self.connection.local_session_id and received_packet.txlocalID == self.connection.remote_session_id:
+                            if self.connection.use_enc:
+                                try:
+                                    buffer = self.connection.security.decrypt_AES_bin(self.connection.aes_key, buffer, 8)
+                                    if not received_packet.packetize_raw(buffer):
+                                        self.logger.warning('Invalid data in encrypted data packet!')
+                                        break
+                                except:
+                                    self.logger.warning('Invalid data in encrypted data packet!')
+                                    break
                             self.connection.receive_packet_start(received_packet)
                 except socket.error:
                     pass
                 if status==True:
                     break
                 time.sleep(0.01)
+
 
             #self.socket.sendto(packet_to_send.build_packet(), (self.remote_ip,self.remote_port))
             #time.sleep(0.01)

@@ -36,7 +36,7 @@ class SignalServer(Thread):
 
         self.logger = logging.getLogger("Signal server")
         self.logger.info("Initializing signal server id: %d at %s" % (self.sender_id, str(time.time())))
-        self.logger.setLevel(logging.WARNING)
+        #self.logger.setLevel(logging.WARNING)
 
         self.sock = LossySocket(socket.AF_INET, socket.SOCK_DGRAM, q = q, p = p)
         self.sock.bind((ip, port))
@@ -93,7 +93,8 @@ class SignalServer(Thread):
                     self.logger.info("packet belongs to existing connection. processing...")
                     found = True
                     if self.use_enc and connection.state == SignalConnection.State.CONNECTED and 'CRY' in self.received_packet.get_flags():
-                        data = self.security.decrypt_AES(connection.aes_key, data, 8)
+                        data = self.security.decrypt_AES_bin(connection.aes_key, data, 8)
+                        #PacketManager.hex_data(data)
                     packet_ok = self.received_packet.packetize_raw(data)
                     self.logger.info("received packet:\n%s" % str(self.received_packet))
                     if not packet_ok:
@@ -177,7 +178,7 @@ class SignalConnection(Connection):
             updatetime = 5):
         self.logger = logging.getLogger('Signal connection')
         self.logger.info("Initializing signal connection to %s:%i at %s" % (remote_ip, remote_port, str(time.time())))
-        self.logger.setLevel(logging.WARNING)
+        #self.logger.setLevel(logging.WARNING)
         Connection.__init__(self, sock = server.sock, remote_ip = remote_ip, remote_port = remote_port,
             local_session_id = local_session_id, remote_session_id = remote_session_id,
             version = version, send_ack_no = send_ack_no, seq_no = seq_no, logger = self.logger,
@@ -343,6 +344,7 @@ class SignalConnection(Connection):
             for entry in tlvlist:
                 self.logger.info(entry)
             self.logger.info('diff:')
+            print manifest
             for entry in manifest:
                 self.logger.info(entry)
                 splitted = entry.split('?')
@@ -394,15 +396,16 @@ class SignalConnection(Connection):
                 elif tlv.split('?')[0] == 'md5sum':
                     md5sum = tlv.split('?')[1]
             # TODO Launch Tomi's code here
-            if fname not in [ses.file_path for ses in self.server.dataserver.session_list]:
-                print '* Creating data connection: *'
+            #if fname not in [ses.file_path for ses in self.server.dataserver.session_list]:
+            if len(self.server.dataserver.session_list) == 0:
+                print '* Creating data connection, with session id: %d *' % local_tx_id
                 print (self.remote_ip, remote_port,
                     local_tx_id, remote_tx_id, self.version, self.server.sender_id,
                     fname, md5sum, fsize)
                 print '**'
                 self.server.dataserver.add_session(self.remote_ip, remote_port,
                     local_tx_id, remote_tx_id, self.version, self.server.sender_id,
-                    fname, md5sum, fsize, True)
+                    fname, md5sum, fsize, True, security = self.security, aes_key = self.aes_key)
         else:
             self.logger.error('invalid packet or state')
     
@@ -485,11 +488,12 @@ class SignalConnection(Connection):
         local_tx_id = self.server.get_new_session_id(random.randint(0, 65535))
         local_data_port = self.server.dataserver.get_port()
         packet_to_send = OutPacket()
-        if fname not in [ses.file_path for ses in self.server.dataserver.session_list]:
+        #if fname not in [ses.file_path for ses in self.server.dataserver.session_list]:
+        if len(self.server.dataserver.session_list) == 0:
             self.server.dataserver.add_session(self.remote_ip, remote_data_port,
                 local_tx_id, remote_tx_id, self.version, self.server.sender_id,
-                fname, '', 0, False)
-            print '* Creating data connection: *'
+                fname, '', 0, False, security = self.security, aes_key = self.aes_key)
+            print '* Creating data connection, with session id: %d *' % local_tx_id
             print (self.remote_ip, remote_data_port,
                 local_tx_id, remote_tx_id, self.version, self.server.sender_id,
                 fname)
@@ -534,6 +538,10 @@ def main():
         return
 
     (port, folder, p_prob, q_prob, peers, passwd) = conf_values
+    if passwd == '':
+        use_enc = False
+    else:
+        use_enc = True
     #Logging of configuration 
     logger.info("Listening on UDP port %s" % (str(port)))
     logger.info("'p' parameter: %s" % (str(p_prob)))
@@ -548,7 +556,7 @@ def main():
     # Sleep a while, so we have an up-to-date manifest TODO Not sure manifest is done.
     time.sleep(2)
 
-    dataserver = DataServer(fsystem.root_path,'0.0.0.0',int(port)+1)
+    dataserver = DataServer(fsystem.root_path,'0.0.0.0',int(port)+1, use_enc = use_enc, p = p_prob, q = q_prob)
     dataserver.start()
     dataserver.add_port()
     server = SignalServer(fsystem = fsystem, dataserver = dataserver, port = int(port),

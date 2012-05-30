@@ -182,7 +182,7 @@ class PacketManager():
         if self.flags & 4 == 4:
             flaglist.append('ECN')
         if self.flags & 2 == 2:
-            flaglist.append('URG')
+            flaglist.append('CRY')
         if self.flags & 1 == 1:
             flaglist.append('ACK')
         return flaglist
@@ -293,7 +293,7 @@ class PacketManager():
             for item in self.flag_list:
                 if item == 'ACK':
                     flagvalue += 1
-                elif item == 'URG':
+                elif item == 'CRY':
                     flagvalue += 2
                 elif item == 'ECN':
                     flagvalue += 4
@@ -367,6 +367,7 @@ class PacketManager():
                     r=r+i2
             print r
             i += 16
+        print ''
 
     @staticmethod
     def hex_data(packet):
@@ -394,6 +395,7 @@ class PacketManager():
                     r=r+i2
             print r
             i += 16
+        print ''
 
 
 class OutPacket(PacketManager):

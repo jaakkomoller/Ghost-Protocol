@@ -33,6 +33,9 @@ class Security:
         self.EncodeAES = lambda c, s: base64.b64encode(c.encrypt(pad(s)))
         self.DecodeAES = lambda c, e: c.decrypt(base64.b64decode(e)).rstrip(self.PADDING)
 
+        self.EncodeAES_bin = lambda c, s: c.encrypt(pad(s))
+        self.DecodeAES_bin = lambda c, e: c.decrypt(e).rstrip(self.PADDING)
+
         # generate a random secret key
         if secret is None:
             secret = os.urandom(self.BLOCK_SIZE)
@@ -46,7 +49,13 @@ class Security:
 
     def decrypt_AES(self,cipher,data,nbytes):
         return data[:nbytes] + self.DecodeAES(cipher, data[nbytes:])
-     
+
+    def encrypt_AES_bin(self,cipher,data,nbytes):
+        return data[:nbytes] + self.EncodeAES_bin(cipher, data[nbytes:])
+
+    def decrypt_AES_bin(self,cipher,data,nbytes):
+        return data[:nbytes] + self.DecodeAES_bin(cipher, data[nbytes:])
+
     def import_key(self, plaintextkey):
         return RSA.importKey(plaintextkey)
 

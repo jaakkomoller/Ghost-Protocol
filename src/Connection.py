@@ -175,23 +175,23 @@ class Connection:
 
         # Read control data
         for item in control_tlvs:
-            t = struct.unpack('i', item[:4])[0]
+            t = struct.unpack('B', item[:1])[0]
             if t == TXCONTROLTYPE['SENDWIN']:
                 # Send window
-                self.remote_send_window = struct.unpack('ii', item)[1]
+                self.remote_send_window = struct.unpack('Bi', item)[1]
                 self.logger.debug("remote send window updated to: %d" % self.remote_send_window)
             elif t == TXCONTROLTYPE['SENDTIME']:
                 # Remote send time
-                self.remote_send_time = struct.unpack('id', item)[1]
+                self.remote_send_time = struct.unpack('Bd', item)[1]
                 self.remote_send_time_receive_time = time.time()
                 self.logger.debug("remote send time set to: %f" % self.remote_send_time)
             elif t == TXCONTROLTYPE['OSENDTIME']:
                 # Local send time and remote processing time
-                i, loc_s_time, pros_time = struct.unpack('idd', item)
+                i, loc_s_time, pros_time = struct.unpack('Bdd', item)
                 self.__setRtt__(time.time() - loc_s_time - pros_time)
                 self.logger.debug("rtt set to: %f, loc %f, pros %f" % (self.rtt, loc_s_time, pros_time))
             else:
-                self.logger.error("Invalid control message: %i" % t)
+                self.logger.error("Invalid control message: %B" % t)
         
 
         self.logger.debug("ack no: %d, packets in unack queue before packet: %d, seq nos: %s" % \
@@ -306,15 +306,15 @@ class Connection:
         # Include send time for RTT measurement
         s_time = time.time()
         #print s_time
-        packet.append_entry_to_TLVlist('TXCONTROL', struct.pack('id', TXCONTROLTYPE['SENDTIME'], s_time))
+        packet.append_entry_to_TLVlist('TXCONTROL', struct.pack('Bd', TXCONTROLTYPE['SENDTIME'], s_time))
 
         # Include send window for window management
-        packet.append_entry_to_TLVlist('TXCONTROL', struct.pack('ii', TXCONTROLTYPE['SENDWIN'], \
+        packet.append_entry_to_TLVlist('TXCONTROL', struct.pack('Bi', TXCONTROLTYPE['SENDWIN'], \
             self.local_send_window))
         
         # Echo send time for RTT measurement
         if self.remote_send_time != 0.0:
-            packet.append_entry_to_TLVlist('TXCONTROL', struct.pack('idd', TXCONTROLTYPE['OSENDTIME'], \
+            packet.append_entry_to_TLVlist('TXCONTROL', struct.pack('Bdd', TXCONTROLTYPE['OSENDTIME'], \
                 self.remote_send_time, time.time() - self.remote_send_time_receive_time))
             self.remote_send_time = 0.0
             self.remote_send_time_receive_time = 0.0
